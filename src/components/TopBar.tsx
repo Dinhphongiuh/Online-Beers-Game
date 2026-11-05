@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, TableState } from '../game/types';
-import { Volume2, VolumeX, Users, Flame, Zap, Droplets, Database } from 'lucide-react';
+import { Volume2, VolumeX, Users, Flame, Zap, Droplets, Database, LogOut } from 'lucide-react';
 
 interface TopBarProps {
   userPlayer: Player;
@@ -11,6 +11,8 @@ interface TopBarProps {
   onOpenShop: () => void;
   onOpenDrinkModal?: () => void;
   onOpenAuth?: () => void;
+  /** Shown instead of the auth shortcut once the player is signed in */
+  onLogout?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -22,6 +24,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenShop,
   onOpenDrinkModal,
   onOpenAuth,
+  onLogout,
 }) => {
   const alcohol = userPlayer.alcoholLevel;
   const stamina = userPlayer.stamina;
@@ -87,6 +90,16 @@ export const TopBar: React.FC<TopBarProps> = ({
           >
             <span className="text-sm">🪪</span>
             <span className="text-[10px] font-bold text-amber-200 hidden sm:inline">Hộ Chiếu</span>
+          </button>
+        )}
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            title="Đăng xuất (rời bàn nhậu)"
+            className="bg-rose-600/20 hover:bg-rose-600 border border-rose-500/50 rounded-xl px-2.5 py-1.5 text-xs text-rose-200 hover:text-white flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-bold hidden sm:inline">Đăng Xuất</span>
           </button>
         )}
       </div>

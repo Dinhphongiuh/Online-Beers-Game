@@ -29,7 +29,7 @@ import { TruthOrDareModal } from './components/TruthOrDareModal';
 import { FaceDoodleModal } from './components/FaceDoodleModal';
 import { ShopModal } from './components/ShopModal';
 import { TableLobbyModal } from './components/TableLobbyModal';
-import { AuthPanelModal } from './components/AuthPanelModal';
+import { AuthPanelModal, AuthUserSession } from './components/AuthPanelModal';
 import { FoodGrabModal, GrabMode, GrabPrecision } from './components/FoodGrabModal';
 import { DrinkAndBladderModal, DRINK_TIERS } from './components/DrinkAndBladderModal';
 import {
@@ -255,7 +255,17 @@ function buildTablePlayers(config?: LobbyConfig): Player[] {
 export default function App({
   lobbyConfig,
   graphics = 'high',
-}: { lobbyConfig?: LobbyConfig; graphics?: GraphicsQuality } = {}) {
+  isLoggedIn = false,
+  onAuthSuccess,
+  onLogout,
+}: {
+  lobbyConfig?: LobbyConfig;
+  graphics?: GraphicsQuality;
+  /** Signed in: the HUD only offers Logout instead of the login/sign-up gate. */
+  isLoggedIn?: boolean;
+  onAuthSuccess?: (session: AuthUserSession) => void;
+  onLogout?: () => void;
+} = {}) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
   const walkStepCountRef = useRef<number>(0);
@@ -4009,7 +4019,8 @@ export default function App({
           setDrinkModalTab('wc');
           setActiveModal('drink_bladder');
         }}
-        onOpenAuth={() => setActiveModal('auth')}
+        onOpenAuth={isLoggedIn ? undefined : () => setActiveModal('auth')}
+        onLogout={isLoggedIn ? onLogout : undefined}
       />
 
       {/* Urgent Living Chaos Event Banner (Rain Tarp QTE, Urban Patrol, or Wife Call Stealth) */}
@@ -4413,7 +4424,7 @@ export default function App({
         />
       )}
 
-      {activeModal === 'auth' && (
+      {activeModal === 'auth' && !isLoggedIn && (
         <AuthPanelModal
           isOpen={true}
           onClose={() => setActiveModal('none')}
@@ -4432,6 +4443,7 @@ export default function App({
                   : p
               ),
             }));
+            onAuthSuccess?.(session);
             setActiveModal('none');
             showToast(`🍻 Chào mừng ${session.username}! Đã cập nhật Hộ Chiếu Tửu Lượng & tặng +500 Nắp Bia!`);
           }}

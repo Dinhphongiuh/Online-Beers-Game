@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, MicOff, Settings, Volume2, VolumeX, Users, MessageSquare, Send, X } from 'lucide-react';
+import { Mic, MicOff, Settings, Volume2, VolumeX, Users, MessageSquare, Send, X, LogOut } from 'lucide-react';
 import { initThreeScene, SceneController, LOBBY_SEAT_COUNT } from '../game/threeScene';
 import { sound } from '../game/audio';
 import { FoodDish, Player, PubTheme } from '../game/types';
@@ -28,7 +28,7 @@ import {
   markAudioUnlocked,
   sfx,
 } from './LobbyPanels';
-import { AuthPanelModal } from '../components/AuthPanelModal';
+import { AuthPanelModal, AuthUserSession } from '../components/AuthPanelModal';
 
 type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite' | 'auth';
 
@@ -68,9 +68,21 @@ export interface MainMenuProps {
   crew: Player[];
   dishes: FoodDish[];
   onStart: (config: LobbyConfig, graphics: GraphicsQuality) => void;
+  /** Signed in: hide every login/sign-up entry point and only offer Logout. */
+  isLoggedIn: boolean;
+  onAuthSuccess: (session: AuthUserSession) => void;
+  onLogout: () => void;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, onStart }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({
+  userTemplate,
+  crew,
+  dishes,
+  onStart,
+  isLoggedIn,
+  onAuthSuccess,
+  onLogout,
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -84,7 +96,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
   }, []);
 
   // ---- Player & table setup ----
-  const [name, setName] = useState('Bợm Nhậu');
+  const [name, setName] = useState(isLoggedIn ? userTemplate.name : 'Bợm Nhậu');
+  // The session can be restored after the lobby mounts (token check), so follow it
+  useEffect(() => {
+    if (isLoggedIn) setName(userTemplate.name);
+  }, [isLoggedIn, userTemplate.name]);
   const [skin, setSkin] = useState<LobbySkin>({
     avatar: userTemplate.avatar,
     clothing: userTemplate.clothing,
@@ -467,7 +483,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
   };
 
   const menuItems: { id: PanelId | 'quick'; icon: string; label: string; sub: string }[] = [
-    { id: 'auth', icon: '🪪', label: 'Cổng Quán Nhậu', sub: 'Sign Up / Login' },
+    ...(isLoggedIn ? [] : [{ id: 'auth' as PanelId, icon: '🪪', label: 'Cổng Quán Nhậu', sub: 'Sign Up / Login' }]),
     { id: 'host', icon: '🔑', label: 'Tạo Bàn Riêng', sub: 'Host Room' },
     { id: 'join', icon: '🔢', label: 'Nhập Mã Bàn', sub: 'Join by Code' },
     { id: 'wardrobe', icon: '👕', label: 'Tủ Đồ Vỉa Hè', sub: 'Wardrobe' },
@@ -685,6 +701,22 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
             </span>
           </button>
 
+          {isLoggedIn ? (
+            <button
+              {...sfx}
+              onClick={() => {
+                sound.playBottleOpen();
+                onLogout();
+                setName('Bợm Nhậu');
+                showToast('👋 Đã đăng xuất khỏi bàn nhậu!');
+              }}
+              className="flex items-center gap-1.5 rounded-2xl bg-rose-600/25 hover:bg-rose-600 border border-rose-500/50 px-3 py-1.5 shadow-lg backdrop-blur-md cursor-pointer text-rose-200 hover:text-white transition"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="text-xs font-black tracking-wide hidden sm:inline">Đăng Xuất</span>
+            </button>
+          ) : (
           <button
             {...sfx}
             onClick={() => openPanel('auth')}
@@ -699,6 +731,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
               18+
             </span>
           </button>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -958,11 +991,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
           onClose={() => setPanel('none')}
         />
       )}
-      {panel === 'auth' && (
+      {panel === 'auth' && !isLoggedIn && (
         <AuthPanelModal
           isOpen={true}
           onClose={() => setPanel('none')}
           onSuccess={(session) => {
+            onAuthSuccess(session);
             setName(session.username);
             setSkin((prev) => ({ ...prev, avatar: session.avatar }));
             setPanel('none');

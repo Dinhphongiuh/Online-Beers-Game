@@ -52,6 +52,27 @@ export default function Root() {
 
   const inGame = phase === 'foam_out' || phase === 'game';
 
+  // Single source of truth for login state: lobby and match only show Logout once signed in
+  const handleAuthSuccess = useCallback((session: AuthUserSession) => {
+    setUserSession(session);
+    setShowAuthGate(false);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    const token = localStorage.getItem('tram_nhau_auth_token');
+    localStorage.removeItem('tram_nhau_auth_token');
+    setUserSession(null);
+    // Leaving the account also leaves the table
+    setPhase('menu');
+    setConfig(null);
+    if (token) {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => null);
+    }
+  }, []);
+
   const currentUser = useMemo(() => {
     if (!userSession) return INITIAL_PLAYERS[0];
     return {
@@ -66,13 +87,22 @@ export default function Root() {
   return (
     <>
       {inGame && config ? (
-        <App lobbyConfig={config} graphics={graphics} />
+        <App
+          lobbyConfig={config}
+          graphics={graphics}
+          isLoggedIn={!!userSession}
+          onAuthSuccess={handleAuthSuccess}
+          onLogout={handleLogout}
+        />
       ) : (
         <MainMenu
           userTemplate={currentUser}
           crew={INITIAL_PLAYERS.slice(1)}
           dishes={INITIAL_DISHES}
           onStart={handleStart}
+          isLoggedIn={!!userSession}
+          onAuthSuccess={handleAuthSuccess}
+          onLogout={handleLogout}
         />
       )}
 
@@ -80,10 +110,7 @@ export default function Root() {
         <AuthPanelModal
           isOpen={true}
           onClose={() => setShowAuthGate(false)}
-          onSuccess={(session) => {
-            setUserSession(session);
-            setShowAuthGate(false);
-          }}
+          onSuccess={handleAuthSuccess}
         />
       )}
 
