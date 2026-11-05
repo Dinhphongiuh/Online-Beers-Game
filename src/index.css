@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Neon text & border glow effects */
+.text-neon-yellow {
+  text-shadow: 0 0 10px rgba(250, 204, 21, 0.8), 0 0 20px rgba(250, 204, 21, 0.4);
+}
+
+.text-neon-red {
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.8), 0 0 20px rgba(239, 68, 68, 0.4);
+}
+
+.text-neon-cyan {
+  text-shadow: 0 0 10px rgba(6, 182, 212, 0.8), 0 0 20px rgba(6, 182, 212, 0.4);
+}
+
+.box-neon-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4), inset 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+.box-neon-yellow {
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.4), inset 0 0 10px rgba(234, 179, 8, 0.2);
+}
+
+/* Drunken visual post-effects on viewport */
+.drunk-tipsy {
+  filter: contrast(105%) saturate(120%);
+}
+
+.drunk-hammered {
+  filter: contrast(115%) saturate(140%) blur(0.6px);
+  animation: drunkSway 6s ease-in-out infinite alternate;
+}
+
+.drunk-blackout {
+  filter: contrast(130%) saturate(160%) blur(1.8px) hue-rotate(15deg);
+  animation: drunkSpin 4s ease-in-out infinite alternate;
+}
+
+@keyframes drunkSway {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(0.8deg) scale(1.02); }
+  100% { transform: rotate(-0.8deg) scale(1.01); }
+}
+
+@keyframes drunkSpin {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(1.8deg) scale(1.04); }
+  75% { transform: rotate(-1.8deg) scale(1.03); }
+  100% { transform: rotate(0.5deg) scale(1.01); }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(24, 24, 27, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.6);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(161, 161, 170, 0.8);
+}

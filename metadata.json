@@ -1,0 +1,6 @@
+{
+  "name": "Trạm Nhậu Online - Nhậu Tới Bến",
+  "description": "3D Physics-based Party Game quán nhậu vỉa hè Việt Nam với ragdoll say xỉn, cụng ly hô dzô qua mic, gắp mồi, minigame lắc xí ngầu, bốc răng cá sấu, 15-20, giằng bill và Thật Hay Thách AI.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
