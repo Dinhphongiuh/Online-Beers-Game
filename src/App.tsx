@@ -29,6 +29,7 @@ import { TruthOrDareModal } from './components/TruthOrDareModal';
 import { FaceDoodleModal } from './components/FaceDoodleModal';
 import { ShopModal } from './components/ShopModal';
 import { TableLobbyModal } from './components/TableLobbyModal';
+import { AuthPanelModal } from './components/AuthPanelModal';
 import { FoodGrabModal, GrabMode, GrabPrecision } from './components/FoodGrabModal';
 import { DrinkAndBladderModal, DRINK_TIERS } from './components/DrinkAndBladderModal';
 import {
@@ -389,6 +390,7 @@ export default function App({
     | 'drink_bladder'
     | 'cheers_toast'
     | 'chaos_arena'
+    | 'auth'
   >('none');
   const [selectedFoodDishId, setSelectedFoodDishId] = useState<string>('peanut');
   const [doodleVictim, setDoodleVictim] = useState<Player | null>(null);
@@ -408,6 +410,33 @@ export default function App({
       setToastNotification((prev) => (prev === msg ? null : prev));
     }, 3500);
   };
+
+  // Synchronize Room State to MongoDB & Redis Cache + Heartbeat presence
+  useEffect(() => {
+    fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomId: tableState.roomId,
+        theme: tableState.theme,
+        players: tableState.players,
+        totalBill: tableState.totalBill,
+      }),
+    }).catch(() => null);
+
+    const interval = setInterval(() => {
+      fetch(`/api/rooms/${encodeURIComponent(tableState.roomId)}/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: userPlayer.id,
+          playerName: userPlayer.name,
+        }),
+      }).catch(() => null);
+    }, 25000);
+
+    return () => clearInterval(interval);
+  }, [tableState.roomId]);
 
   // Initialize 3D Scene once
   useEffect(() => {
@@ -3980,6 +4009,7 @@ export default function App({
           setDrinkModalTab('wc');
           setActiveModal('drink_bladder');
         }}
+        onOpenAuth={() => setActiveModal('auth')}
       />
 
       {/* Urgent Living Chaos Event Banner (Rain Tarp QTE, Urban Patrol, or Wife Call Stealth) */}
@@ -4380,6 +4410,31 @@ export default function App({
           onRemovePlayer={handleRemovePlayer}
           onChangeTheme={handleChangeTheme}
           onClose={() => setActiveModal('none')}
+        />
+      )}
+
+      {activeModal === 'auth' && (
+        <AuthPanelModal
+          isOpen={true}
+          onClose={() => setActiveModal('none')}
+          onSuccess={(session) => {
+            setTableState((prev) => ({
+              ...prev,
+              players: prev.players.map((p) =>
+                p.isUser
+                  ? {
+                      ...p,
+                      name: session.username,
+                      avatar: session.avatar,
+                      title: session.title,
+                      coins: p.coins + 500,
+                    }
+                  : p
+              ),
+            }));
+            setActiveModal('none');
+            showToast(`🍻 Chào mừng ${session.username}! Đã cập nhật Hộ Chiếu Tửu Lượng & tặng +500 Nắp Bia!`);
+          }}
         />
       )}
 

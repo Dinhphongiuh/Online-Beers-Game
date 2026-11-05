@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, TableState } from '../game/types';
-import { Volume2, VolumeX, Users, Flame, Zap, Droplets } from 'lucide-react';
+import { Volume2, VolumeX, Users, Flame, Zap, Droplets, Database } from 'lucide-react';
 
 interface TopBarProps {
   userPlayer: Player;
@@ -10,6 +10,7 @@ interface TopBarProps {
   onOpenLobby: () => void;
   onOpenShop: () => void;
   onOpenDrinkModal?: () => void;
+  onOpenAuth?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -20,6 +21,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenLobby,
   onOpenShop,
   onOpenDrinkModal,
+  onOpenAuth,
 }) => {
   const alcohol = userPlayer.alcoholLevel;
   const stamina = userPlayer.stamina;
@@ -65,6 +67,28 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Users className="w-3.5 h-3.5 text-amber-400" />
           <span className="font-bold">{tableState.players.length}/8</span>
         </button>
+
+        {/* MongoDB & Redis Backend Status Shortcut */}
+        <button
+          onClick={onOpenLobby}
+          title="Trạng thái MongoDB & Redis Cache (Nhấn để xem Bảng Vàng & Đồng Bộ)"
+          className="bg-zinc-900/90 hover:bg-zinc-800 border border-emerald-500/40 rounded-xl px-2.5 py-1.5 text-xs text-emerald-400 flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
+        >
+          <Database className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-[10px] font-mono font-bold text-zinc-300 hidden sm:inline">DB/Redis</span>
+        </button>
+
+        {/* Cổng Quán / Hộ Chiếu Auth Shortcut */}
+        {onOpenAuth && (
+          <button
+            onClick={onOpenAuth}
+            title="Cổng Quán: Đăng Nhập / Đăng Ký / Hộ Chiếu Tửu Lượng & MongoDB"
+            className="bg-zinc-900/90 hover:bg-zinc-800 border border-amber-500/40 rounded-xl px-2.5 py-1.5 text-xs text-amber-300 flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
+          >
+            <span className="text-sm">🪪</span>
+            <span className="text-[10px] font-bold text-amber-200 hidden sm:inline">Hộ Chiếu</span>
+          </button>
+        )}
       </div>
 
       {/* Top Center: Drunk Meter, Stamina & Bladder (Bụng Bia) Gauges */}

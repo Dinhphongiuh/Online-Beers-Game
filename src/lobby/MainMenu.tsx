@@ -28,8 +28,9 @@ import {
   markAudioUnlocked,
   sfx,
 } from './LobbyPanels';
+import { AuthPanelModal } from '../components/AuthPanelModal';
 
-type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite';
+type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite' | 'auth';
 
 interface SquadMember {
   id: string;
@@ -466,6 +467,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
   };
 
   const menuItems: { id: PanelId | 'quick'; icon: string; label: string; sub: string }[] = [
+    { id: 'auth', icon: '🪪', label: 'Cổng Quán Nhậu', sub: 'Sign Up / Login' },
     { id: 'host', icon: '🔑', label: 'Tạo Bàn Riêng', sub: 'Host Room' },
     { id: 'join', icon: '🔢', label: 'Nhập Mã Bàn', sub: 'Join by Code' },
     { id: 'wardrobe', icon: '👕', label: 'Tủ Đồ Vỉa Hè', sub: 'Wardrobe' },
@@ -666,21 +668,38 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
 
       {/* ---------- TOP BAR ---------- */}
       <div className={`absolute top-0 inset-x-0 z-30 flex items-start justify-between gap-2 p-2 sm:p-3 transition-opacity ${starting ? 'opacity-0' : ''}`}>
-        <button
-          {...sfx}
-          onClick={() => openPanel('profile')}
-          className="flex items-center gap-2 rounded-2xl bg-zinc-950/85 border border-amber-500/40 pl-1 pr-3 py-1 shadow-lg backdrop-blur-md cursor-pointer hover:border-amber-400 text-left"
-        >
-          <span className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-orange-500 flex items-center justify-center text-xl border-2 border-amber-200">
-            {AVATAR_ICON[skin.avatar]}
-          </span>
-          <span className="min-w-0">
-            <span className="block text-[13px] font-black truncate max-w-[110px] sm:max-w-[180px]">{name || 'Bợm Nhậu'}</span>
-            <span className="block text-[10px] text-amber-300 font-bold">
-              Lv.{rank.level} • {rank.name}
+        <div className="flex items-center gap-2">
+          <button
+            {...sfx}
+            onClick={() => openPanel('profile')}
+            className="flex items-center gap-2 rounded-2xl bg-zinc-950/85 border border-amber-500/40 pl-1 pr-3 py-1 shadow-lg backdrop-blur-md cursor-pointer hover:border-amber-400 text-left"
+          >
+            <span className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-orange-500 flex items-center justify-center text-xl border-2 border-amber-200">
+              {AVATAR_ICON[skin.avatar]}
             </span>
-          </span>
-        </button>
+            <span className="min-w-0">
+              <span className="block text-[13px] font-black truncate max-w-[110px] sm:max-w-[180px]">{name || 'Bợm Nhậu'}</span>
+              <span className="block text-[10px] text-amber-300 font-bold">
+                Lv.{rank.level} • {rank.name}
+              </span>
+            </span>
+          </button>
+
+          <button
+            {...sfx}
+            onClick={() => openPanel('auth')}
+            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-500/25 to-orange-500/25 border border-amber-400/60 px-3 py-1.5 shadow-lg backdrop-blur-md cursor-pointer hover:border-amber-300 text-amber-200 hover:text-white transition"
+            title="Mở Cổng Quán Nhậu: Đăng Ký, Đăng Nhập, Nhậu Chui & MongoDB Payload"
+          >
+            <span className="text-base">🪪</span>
+            <span className="text-xs font-black tracking-wide hidden sm:inline">
+              Đăng Nhập / Đăng Ký
+            </span>
+            <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.2 rounded-full">
+              18+
+            </span>
+          </button>
+        </div>
 
         <div className="flex items-center gap-1.5">
           <div className="flex items-center gap-1.5 rounded-xl bg-zinc-950/85 border border-zinc-700 px-2 py-1.5 shadow-lg" title="Nắp Bia (tiền thường)">
@@ -937,6 +956,18 @@ export const MainMenu: React.FC<MainMenuProps> = ({ userTemplate, crew, dishes, 
             setPanel('none');
           }}
           onClose={() => setPanel('none')}
+        />
+      )}
+      {panel === 'auth' && (
+        <AuthPanelModal
+          isOpen={true}
+          onClose={() => setPanel('none')}
+          onSuccess={(session) => {
+            setName(session.username);
+            setSkin((prev) => ({ ...prev, avatar: session.avatar }));
+            setPanel('none');
+            showToast(`🍻 Chào mừng ${session.username}! Đã nhận +500 Nắp Bia Tân Thủ!`);
+          }}
         />
       )}
     </div>

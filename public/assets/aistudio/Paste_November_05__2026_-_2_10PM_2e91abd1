@@ -1,0 +1,3645 @@
+import React, { useState, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import {
+  Beer,
+  KeyRound,
+  Shirt,
+  ScrollText,
+  Volume2,
+  VolumeX,
+  Plus,
+  Mic,
+  Send,
+  Sparkles,
+  Flame,
+  UserPlus,
+  X,
+  PartyPopper,
+  PhoneIncoming,
+  Siren,
+  Receipt,
+  Dices,
+  RotateCcw,
+  Camera,
+  Music,
+  Zap,
+  Award,
+  AlertTriangle,
+  Footprints,
+  Trash2,
+  StickyNote,
+  Smile,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Database,
+  LogOut,
+  CheckCircle2,
+  HelpCircle,
+  Wallet,
+  Copy,
+  Check
+} from 'lucide-react';
+
+// ============================================================================
+// 1. WEB AUDIO API PROCEDURAL SOUND ENGINE (KHÔNG CẦN FILE MP3 NGOÀI)
+// ============================================================================
+class StreetSoundEngine {
+  constructor() {
+    this.ctx = null;
+    this.enabled = true;
+  }
+
+  init() {
+    if (!this.ctx && typeof window !== 'undefined') {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  playClink() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Tiếng ly thủy tinh cụng nhau "Leng keng!"
+    [1480, 2217, 2960].forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.03);
+      gain.gain.setValueAtTime(0.18, now + idx * 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55 + idx * 0.05);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now + idx * 0.03);
+      osc.stop(now + 0.65);
+    });
+  }
+
+  playPop() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.09);
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.13);
+  }
+
+  playBottleCapOpen() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Tiếng "Bóc... Xììì!" khi bật nắp chai bia
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(1250, now + 0.06);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.09);
+
+    // Tiếng xì ga bọt bia
+    const bufferSize = this.ctx.sampleRate * 0.22;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.5));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.18, now + 0.05);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    noise.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(now + 0.05);
+  }
+
+  playBuzzer() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.setValueAtTime(115, now + 0.12);
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.34);
+  }
+
+  playPouringTick(pitchFactor = 1) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(280 + pitchFactor * 420, now);
+    gain.gain.setValueAtTime(0.06, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.06);
+  }
+
+  playSlap() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Tiếng dép tổ ong đập "BỐP!"
+    const bufferSize = this.ctx.sampleRate * 0.12;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.45, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+    noise.connect(gain);
+    gain.connect(this.ctx.destination);
+    noise.start(now);
+  }
+
+  playTableCrash() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 0.5);
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.6);
+    this.playClink();
+  }
+
+  playSiren() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(650, now);
+    osc.frequency.setValueAtTime(920, now + 0.2);
+    osc.frequency.setValueAtTime(650, now + 0.4);
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.66);
+  }
+}
+
+const sfx = new StreetSoundEngine();
+
+// ============================================================================
+// 2. DỮ LIỆU VĂN MẪU DÂN NHẬU & CẤU HÌNH NHÂN VẬT 3D
+// ============================================================================
+const DRUNK_QUOTES = [
+  "Tao nói thật với mày nhé... ực... tao coi mày như anh em ruột!",
+  "Tao chưa say! Đứa nào bảo tao say bước ra đây uống solo 1-1?!",
+  "Hôm nay không say không về! Đứa nào về trước làm con cún! 🐶",
+  "Tiền bạc phù du! Đêm nay anh bao hết... ủa mà ví anh đâu rồi?",
+  "Sao cái bàn inox hôm nay nó cứ xoay vòng vòng thế nhỉ anh em? 🥴",
+  "Em ơi cho thêm 1 két... à thôi cho 1 ly trà đá giải rượu coi!",
+  "Tao giấu mày chuyện này lâu lắm rồi... hồi xưa tao lỡ lấy dép tổ ong của mày!"
+];
+
+const SPECIES_LIST = [
+  {
+    id: 'cau_vang',
+    name: 'Cậu Vàng',
+    title: 'Hệ Nhiệt Tình',
+    emoji: '🐕',
+    bodyColor: 0xf59e0b,
+    bellyColor: 0xfde68a,
+    shirtColor: 0xffffff,
+    desc: 'Áo ba lỗ trắng • Quần đùi hoa • Dép tổ ong huyền thoại'
+  },
+  {
+    id: 'capybara',
+    name: 'Đại Ca Capy',
+    title: 'Hệ Đô Bất Tử',
+    emoji: '🦫',
+    bodyColor: 0x92400e,
+    bellyColor: 0xb45309,
+    shirtColor: 0x1e293b,
+    desc: 'Kính râm đen • Dây chuyền vàng 9999 • Ngồi im gắp mồi'
+  },
+  {
+    id: 'meo_cam',
+    name: 'Hoàng Thượng',
+    title: 'Hệ Lươn Lẹo',
+    emoji: '🐱',
+    bodyColor: 0xf97316,
+    bellyColor: 0xffedd5,
+    shirtColor: 0xe11d48,
+    desc: 'Áo sơ mi bông Hawaii • Chuyên gia nhấp môi & trốn bill'
+  },
+  {
+    id: 'vit_vang',
+    name: 'Vịt Nón Lá',
+    title: 'Tấm Chiếu Mới',
+    emoji: '🦆',
+    bodyColor: 0xfacc15,
+    bellyColor: 0xfef08a,
+    shirtColor: 0x0284c7,
+    desc: 'Đội nón lá • Mới ngửi mùi bia đã đỏ mặt'
+  },
+  {
+    id: 'gau_truc',
+    name: 'Gấu Tăng Ca',
+    title: 'Hệ Dân Văn Phòng',
+    emoji: '🐼',
+    bodyColor: 0xf8fafc,
+    bellyColor: 0xe2e8f0,
+    shirtColor: 0x3b82f6,
+    desc: 'Sơ mi trắng cà vạt • Vừa chạy deadline vừa cụng ly'
+  }
+];
+
+const HAT_OPTIONS = [
+  { id: 'none', name: 'Không Đội', icon: '✖️' },
+  { id: 'non_la', name: 'Nón Lá Việt Nam', icon: '👒' },
+  { id: 'sunglasses', name: 'Kính Đen Đại Ca', icon: '🕶️' },
+  { id: 'helmet', name: 'Nón Bảo Hiểm', icon: '🪖' },
+  { id: 'sticky_note', name: 'Giấy Dán Trán "Bao Hết"', icon: '📝' }
+];
+
+const DRUNK_ARCHETYPES = [
+  {
+    id: 'TRIET_GIA',
+    name: 'Hệ Triết Gia',
+    icon: '🧐',
+    quote: 'Đứng lên ghế nhựa giảng đạo lý làm cả bàn buồn ngủ'
+  },
+  {
+    id: 'VO_SI',
+    name: 'Hệ Võ Sĩ',
+    icon: '🥊',
+    quote: 'Nhìn cột điện tưởng đối thủ, lực ném ghế nhựa x200%'
+  },
+  {
+    id: 'HAO_PHONG',
+    name: 'Hệ Hào Phóng',
+    icon: '💸',
+    quote: 'Cứ trên 80% cồn là tự rút ví ném xu tung tóe khắp bàn'
+  },
+  {
+    id: 'NINJA_TRON_BILL',
+    name: 'Hệ Ninja Trốn Bill',
+    icon: '🥷',
+    quote: 'Tàng hình lủi ra bãi giữ xe ngay khi bà chủ cầm hóa đơn ra'
+  },
+  {
+    id: 'SUY_TINH',
+    name: 'Hệ Suy Tình',
+    icon: '💔',
+    quote: 'Chui xuống gầm bàn khóc ròng và bấm số gọi Người Yêu Cũ'
+  }
+];
+
+const FUNNY_RANDOM_NAMES = [
+  'Thần Cồn Quận 4',
+  'Chúa Tể Gắp Mồi',
+  'Sát Thủ Chân Gà',
+  'Thánh Trốn Bill',
+  'Dũng Sĩ Diệt Mồi',
+  'Cậu Vàng Bờ Kè',
+  'Tấm Chiếu Mới Nhậu',
+  'Kiện Tướng Nhấp Môi',
+  'Đại Gia Bao Chầu',
+  'Chiến Thần Rượu Đế'
+];
+
+// ============================================================================
+// 2B. MASCOT BẢO VỆ QUÁN "CẬU VÀNG" TƯƠNG TÁC (SVG BOUNCER GUARD)
+// ============================================================================
+function CauVangBouncerSVG({ isPasswordFocused, showPassword, captchaStatus }) {
+  return (
+    <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto select-none">
+      {/* Hào quang đèn Neon phía sau Cậu Vàng */}
+      <div
+        className={`absolute inset-0 rounded-full blur-xl transition-all duration-500 ${
+          captchaStatus === 'OVERFLOW'
+            ? 'bg-rose-500/50 scale-110'
+            : captchaStatus === 'SUCCESS'
+            ? 'bg-emerald-400/50 scale-110'
+            : 'bg-amber-400/35'
+        }`}
+      />
+
+      <svg viewBox="0 0 200 200" className="relative z-10 w-full h-full drop-shadow-xl">
+        {/* Hai tai Cậu Vàng */}
+        <ellipse
+          cx="42"
+          cy="82"
+          rx="20"
+          ry="36"
+          transform={isPasswordFocused ? 'rotate(18 42 82)' : 'rotate(10 42 82)'}
+          fill="#d97706"
+          className="transition-all duration-300"
+        />
+        <ellipse
+          cx="158"
+          cy="82"
+          rx="20"
+          ry="36"
+          transform={isPasswordFocused ? 'rotate(-18 158 82)' : 'rotate(-10 158 82)'}
+          fill="#d97706"
+          className="transition-all duration-300"
+        />
+
+        {/* Thân mặc Áo Ba Lỗ Trắng & Dây Chuyền Vàng 9999 */}
+        <path
+          d="M 48 145 Q 100 130 152 145 L 164 195 L 36 195 Z"
+          fill="#ffffff"
+          stroke="#cbd5e1"
+          strokeWidth="3"
+        />
+        <path
+          d="M 66 150 Q 100 176 134 150"
+          fill="none"
+          stroke="#facc15"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray="8 5"
+        />
+
+        {/* Đầu Chibi Cậu Vàng */}
+        <circle cx="100" cy="92" r="54" fill="#f59e0b" />
+        <ellipse cx="100" cy="108" rx="34" ry="25" fill="#fde68a" />
+
+        {/* Hai má hồng ngà ngà say */}
+        <ellipse cx="60" cy="102" rx="11" ry="6" fill="#f43f5e" opacity="0.55" />
+        <ellipse cx="140" cy="102" rx="11" ry="6" fill="#f43f5e" opacity="0.55" />
+
+        {/* Mắt & Kính Râm Đen Bảo Vệ Quán */}
+        {!isPasswordFocused && (
+          <g className="transition-all duration-300">
+            {/* Khi bình thường: Đeo kính râm cực ngầu */}
+            <rect x="54" y="66" width="38" height="22" rx="5" fill="#0f172a" stroke="#facc15" strokeWidth="2.5" />
+            <rect x="108" y="66" width="38" height="22" rx="5" fill="#0f172a" stroke="#facc15" strokeWidth="2.5" />
+            <line x1="92" y1="74" x2="108" y2="74" stroke="#facc15" strokeWidth="3" />
+            <line x1="60" y1="71" x2="74" y2="82" stroke="#38bdf8" strokeWidth="2" opacity="0.7" />
+            <line x1="114" y1="71" x2="128" y2="82" stroke="#38bdf8" strokeWidth="2" opacity="0.7" />
+          </g>
+        )}
+
+        {isPasswordFocused && (
+          <g className="transition-all duration-300">
+            {/* Mắt mở to khi người chơi bật "Hiện Mật Khẩu" để nhìn lén */}
+            <circle cx="74" cy="78" r="8" fill="#111827" />
+            <circle cx="76" cy="75" r="2.5" fill="#ffffff" />
+            <circle cx="126" cy="78" r="8" fill="#111827" />
+            <circle cx="128" cy="75" r="2.5" fill="#ffffff" />
+          </g>
+        )}
+
+        {/* Mũi & Miệng cười bựa */}
+        <ellipse cx="100" cy="98" rx="10" ry="7" fill="#1e293b" />
+        {captchaStatus === 'OVERFLOW' ? (
+          <circle cx="100" cy="118" r="9" fill="#991b1b" />
+        ) : (
+          <path
+            d="M 82 113 Q 100 128 118 113"
+            fill="none"
+            stroke="#1e293b"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+        )}
+        {/* Lưỡi thè nhẹ */}
+        <path d="M 94 120 Q 100 132 106 120 Z" fill="#fb7185" />
+
+        {/* HAI TAY CẦM LY BIA CỐI CHE MẮT KHI NHẬP PASSWORD */}
+        <g
+          style={{
+            transform: isPasswordFocused
+              ? showPassword
+                ? 'translate(0px, 14px)' // Hé ly bia xuống nhìn trộm mật khẩu!
+                : 'translate(0px, -36px)' // Đưa 2 ly bia lên che kín mắt!
+              : 'translate(0px, 32px)',
+            transition: 'transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1)'
+          }}
+        >
+          {/* Tay trái + Ly bia trái */}
+          <g transform="translate(38, 95)">
+            <rect x="0" y="0" width="34" height="42" rx="6" fill="#fef08a" stroke="#f59e0b" strokeWidth="3" />
+            <rect x="-2" y="-7" width="38" height="12" rx="6" fill="#ffffff" />
+            <circle cx="32" cy="20" r="14" fill="#d97706" />
+          </g>
+
+          {/* Tay phải + Ly bia phải (hoặc Dép tổ ong) */}
+          <g transform="translate(128, 95)">
+            <rect x="0" y="0" width="34" height="42" rx="6" fill="#fef08a" stroke="#f59e0b" strokeWidth="3" />
+            <rect x="-2" y="-7" width="38" height="12" rx="6" fill="#ffffff" />
+            <circle cx="2" cy="20" r="14" fill="#d97706" />
+          </g>
+        </g>
+      </svg>
+
+      {/* Bong bóng thoại nhỏ của Cậu Vàng Bảo Vệ */}
+      <div className=" -mt-2 bg-slate-950/95 border border-amber-400 text-amber-200 px-2.5 py-0.5 rounded-full text-[10px] font-black text-center shadow-lg">
+        {isPasswordFocused
+          ? showPassword
+            ? '👀 Á đù! Mật khẩu dễ đoán thế!'
+            : '🙈 Cậu Vàng đã che mắt, yên tâm gõ!'
+          : captchaStatus === 'OVERFLOW'
+          ? '💦 Rót tràn bọt hết ra bàn rồi kìa!'
+          : captchaStatus === 'SUCCESS'
+          ? '🍻 Chuẩn đét! Mời đại ca vào bàn!'
+          : '🩴 Xuất trình Hộ Chiếu Tửu Lượng!'}
+      </div>
+    </div>
+  );
+}
+
+// Hàm biến đổi văn bản chat theo Độ Cồn (Alcohol Text Mutator)
+function mutateDrunkText(rawText, alcoholLevel) {
+  if (!rawText) return { text: '', style: 'NORMAL', replaced: false };
+
+  if (alcoholLevel <= 30) {
+    return { text: rawText, style: 'NORMAL', replaced: false };
+  }
+
+  if (alcoholLevel <= 65) {
+    const slurred = rawText
+      .replace(/([aăâeêioôơuưy])/gi, (m, p1, offset) => (offset % 2 === 0 ? m.repeat(3) : m))
+      .replace(/\s+/g, (m, offset) => (offset % 3 === 0 ? ' ...ực... ' : ' '));
+    return { text: slurred + ' 🍺', style: 'TIPSY', replaced: false };
+  }
+
+  if (/về|nghỉ|thôi|ngủ/i.test(rawText)) {
+    return {
+      text: "Về là về thế nào?! Hôm nay không say không về! 🍺🔥",
+      style: 'WASTED',
+      replaced: true
+    };
+  }
+  if (/tiền|bill|hóa đơn|trả/i.test(rawText)) {
+    return {
+      text: "Tiền bạc tầm này quan trọng gì! Để tao... ủa ví tao đâu rồi?! 💸",
+      style: 'WASTED',
+      replaced: true
+    };
+  }
+
+  if (Math.random() < 0.78 || alcoholLevel >= 85) {
+    const randomQuote = DRUNK_QUOTES[Math.floor(Math.random() * DRUNK_QUOTES.length)];
+    return { text: randomQuote, style: 'WASTED', replaced: true };
+  }
+
+  const chaotic =
+    rawText
+      .split('')
+      .map((c, i) => (i % 2 === 0 ? c.toUpperCase() : c.toLowerCase()))
+      .join('') + ' ...ợ... 🥴🌀';
+  return { text: chaotic, style: 'WASTED', replaced: false };
+}
+
+// ============================================================================
+// 3. HÀM DỰNG MODEL NHÂN VẬT THÚ BÔNG 3D CHIBI (THREE.JS PROCEDURAL PLUSHIE)
+// ============================================================================
+function createPlushieCharacterMesh(speciesConfig, hatId = 'none') {
+  const root = new THREE.Group();
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: speciesConfig.bodyColor,
+    roughness: 0.75
+  });
+  const bellyMat = new THREE.MeshStandardMaterial({
+    color: speciesConfig.bellyColor,
+    roughness: 0.8
+  });
+  const shirtMat = new THREE.MeshStandardMaterial({
+    color: speciesConfig.shirtColor,
+    roughness: 0.65
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.3 });
+  const blushMat = new THREE.MeshBasicMaterial({
+    color: 0xf43f5e,
+    transparent: true,
+    opacity: 0.0
+  });
+
+  // Torso (Thân trên mềm oặt để lắc lư theo độ say)
+  const torsoPivot = new THREE.Group();
+  torsoPivot.position.set(0, 0.95, 0);
+  root.add(torsoPivot);
+
+  // Thân chính
+  const torsoGeo = new THREE.SphereGeometry(0.55, 20, 20);
+  torsoGeo.scale(1, 1.12, 0.92);
+  const torsoMesh = new THREE.Mesh(torsoGeo, bodyMat);
+  torsoMesh.castShadow = true;
+  torsoPivot.add(torsoMesh);
+
+  // Áo ba lỗ / Áo sơ mi
+  const shirtGeo = new THREE.CylinderGeometry(0.52, 0.56, 0.52, 20);
+  const shirtMesh = new THREE.Mesh(shirtGeo, shirtMat);
+  shirtMesh.position.set(0, 0.12, 0);
+  torsoPivot.add(shirtMesh);
+
+  // Bụng Bia (Scale to ra theo chỉ số Bladder / Beer Belly)
+  const bellyGeo = new THREE.SphereGeometry(0.42, 18, 18);
+  const bellyMesh = new THREE.Mesh(bellyGeo, bellyMat);
+  bellyMesh.position.set(0, -0.12, 0.28);
+  torsoPivot.add(bellyMesh);
+
+  // Đầu Chibi
+  const headGroup = new THREE.Group();
+  headGroup.position.set(0, 0.78, 0);
+  torsoPivot.add(headGroup);
+
+  const headGeo = new THREE.SphereGeometry(0.52, 24, 24);
+  headGeo.scale(1.08, 0.96, 1.0);
+  const headMesh = new THREE.Mesh(headGeo, bodyMat);
+  headMesh.castShadow = true;
+  headGroup.add(headMesh);
+
+  // Mõm / Mỏ tùy loài
+  if (speciesConfig.id === 'vit_vang') {
+    const beakMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 });
+    const beak = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.35), beakMat);
+    beak.position.set(0, -0.06, 0.5);
+    headGroup.add(beak);
+  } else {
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 14), bellyMat);
+    snout.scale.set(1.2, 0.85, 0.9);
+    snout.position.set(0, -0.07, 0.45);
+    headGroup.add(snout);
+
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), darkMat);
+    nose.position.set(0, -0.01, 0.62);
+    headGroup.add(nose);
+  }
+
+  // Hai mắt + Mí mắt sụp khi say
+  const eyeGeo = new THREE.SphereGeometry(0.068, 12, 12);
+  const leftEye = new THREE.Mesh(eyeGeo, darkMat);
+  leftEye.position.set(-0.19, 0.08, 0.46);
+  const rightEye = new THREE.Mesh(eyeGeo, darkMat);
+  rightEye.position.set(0.19, 0.08, 0.46);
+  headGroup.add(leftEye, rightEye);
+
+  // Hai vệt má hồng đỏ ửng khi có cồn
+  const blushGeo = new THREE.SphereGeometry(0.09, 10, 10);
+  blushGeo.scale(1.3, 0.6, 0.5);
+  const leftBlush = new THREE.Mesh(blushGeo, blushMat);
+  leftBlush.position.set(-0.3, -0.06, 0.44);
+  const rightBlush = new THREE.Mesh(blushGeo, blushMat);
+  rightBlush.position.set(0.3, -0.06, 0.44);
+  headGroup.add(leftBlush, rightBlush);
+
+  // Tai nhân vật
+  if (speciesConfig.id === 'cau_vang') {
+    const earGeo = new THREE.BoxGeometry(0.18, 0.42, 0.24);
+    const leftEar = new THREE.Mesh(earGeo, bodyMat);
+    leftEar.position.set(-0.5, 0.05, 0);
+    leftEar.rotation.z = 0.25;
+    const rightEar = new THREE.Mesh(earGeo, bodyMat);
+    rightEar.position.set(0.5, 0.05, 0);
+    rightEar.rotation.z = -0.25;
+    headGroup.add(leftEar, rightEar);
+  } else if (speciesConfig.id === 'meo_cam') {
+    const earGeo = new THREE.ConeGeometry(0.18, 0.34, 4);
+    const leftEar = new THREE.Mesh(earGeo, bodyMat);
+    leftEar.position.set(-0.34, 0.48, 0);
+    leftEar.rotation.z = 0.3;
+    const rightEar = new THREE.Mesh(earGeo, bodyMat);
+    rightEar.position.set(0.34, 0.48, 0);
+    rightEar.rotation.z = -0.3;
+    headGroup.add(leftEar, rightEar);
+  } else {
+    const earMountMat = speciesConfig.id === 'gau_truc' ? darkMat : bodyMat;
+    const earGeo = new THREE.SphereGeometry(0.16, 12, 12);
+    const leftEar = new THREE.Mesh(earGeo, earMountMat);
+    leftEar.position.set(-0.38, 0.42, 0);
+    const rightEar = new THREE.Mesh(earGeo, earMountMat);
+    rightEar.position.set(0.38, 0.42, 0);
+    headGroup.add(leftEar, rightEar);
+  }
+
+  // Phụ kiện trên đầu (Nón lá, Kính đen, Nón bảo hiểm, Giấy Note dán trán)
+  const hatGroup = new THREE.Group();
+  headGroup.add(hatGroup);
+
+  if (hatId === 'non_la' || speciesConfig.id === 'vit_vang') {
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: 0xfde047,
+      roughness: 0.7,
+      side: THREE.DoubleSide
+    });
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.42, 24), coneMat);
+    cone.position.set(0, 0.56, 0);
+    hatGroup.add(cone);
+  }
+  if (hatId === 'sunglasses' || speciesConfig.id === 'capybara') {
+    const glassFrame = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.14, 0.1), darkMat);
+    glassFrame.position.set(0, 0.1, 0.49);
+    hatGroup.add(glassFrame);
+  }
+  if (hatId === 'helmet') {
+    const helmetMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 });
+    const helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.56, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      helmetMat
+    );
+    helmet.position.set(0, 0.08, 0);
+    hatGroup.add(helmet);
+  }
+
+  // Tờ giấy Note vàng dán trán ("TỐI NAY TAO BAO")
+  const stickyNoteMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.5 });
+  const stickyNoteMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.24, 0.02), stickyNoteMat);
+  stickyNoteMesh.position.set(0, 0.25, 0.52);
+  stickyNoteMesh.rotation.x = -0.15;
+  stickyNoteMesh.visible = hatId === 'sticky_note';
+  headGroup.add(stickyNoteMesh);
+
+  // Điểm chất vỏ lon bia lên đầu khi ngủ gục (Can Stack Group)
+  const canStackGroup = new THREE.Group();
+  canStackGroup.position.set(0, 0.55, 0);
+  headGroup.add(canStackGroup);
+
+  // Hai cánh tay "Bún" (Noodle Arms) + Cầm Ly Bia Cối ở tay phải
+  const leftArmPivot = new THREE.Group();
+  leftArmPivot.position.set(-0.56, 0.22, 0);
+  const leftArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.45, 8, 12), bodyMat);
+  leftArmMesh.position.set(0, -0.22, 0.15);
+  leftArmMesh.rotation.x = -0.7;
+  leftArmPivot.add(leftArmMesh);
+  torsoPivot.add(leftArmPivot);
+
+  const rightArmPivot = new THREE.Group();
+  rightArmPivot.position.set(0.56, 0.22, 0);
+  const rightArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.45, 8, 12), bodyMat);
+  rightArmMesh.position.set(0, -0.18, 0.22);
+  rightArmMesh.rotation.x = -1.1;
+  rightArmPivot.add(rightArmMesh);
+
+  // Ly Bia Cối cầm trên tay phải
+  const handMugGroup = new THREE.Group();
+  handMugGroup.position.set(0, -0.32, 0.48);
+  const mugGlass = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.14, 0.12, 0.34, 14),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.1
+    })
+  );
+  const mugBeer = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.125, 0.11, 0.24, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.25
+    })
+  );
+  mugBeer.position.y = -0.03;
+  const mugFoam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.135, 0.13, 0.08, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 })
+  );
+  mugFoam.position.y = 0.13;
+  handMugGroup.add(mugGlass, mugBeer, mugFoam);
+  rightArmPivot.add(handMugGroup);
+  torsoPivot.add(rightArmPivot);
+
+  // Hai chân ngắn + Dép Tổ Ong Vàng
+  const slipperMat = new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.6 });
+  [-0.24, 0.24].forEach((xOffset) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.13, 0.38, 10), bodyMat);
+    leg.position.set(xOffset, 0.38, 0.22);
+    leg.rotation.x = -1.2;
+    const slipper = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.34), slipperMat);
+    slipper.position.set(xOffset, 0.24, 0.42);
+    root.add(leg, slipper);
+  });
+
+  return {
+    root,
+    torsoPivot,
+    headGroup,
+    bellyMesh,
+    leftArmPivot,
+    rightArmPivot,
+    blushMat,
+    stickyNoteMesh,
+    canStackGroup,
+    shirtMat,
+    bodyMat
+  };
+}
+
+// ============================================================================
+// 4. COMPONENT CHÍNH: SẢNH CHỜ & BÀN NHẬU 3D TƯƠNG TÁC (AAA GAME PROTOTYPE)
+// ============================================================================
+export default function App() {
+  // --- TRẠNG THÁI MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ / CỔNG QUÁN NHẬU ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authTab, setAuthTab] = useState('LOGIN'); // 'LOGIN' | 'SIGNUP' | 'GUEST'
+  const [authSuccessModal, setAuthSuccessModal] = useState(false);
+  const [forgotPassModal, setForgotPassModal] = useState(false);
+  const [forgotPassSent, setForgotPassSent] = useState(false);
+  const [showMongoDrawer, setShowMongoDrawer] = useState(false);
+  const [copiedJson, setCopiedJson] = useState(false);
+
+  // State Form Đăng Nhập / Đăng Ký / Nhậu Chui
+  const [loginIdentifier, setLoginIdentifier] = useState('cauvang_doluc@nhau.vn');
+  const [password, setPassword] = useState('khongsaykhongve123');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+
+  // State Làm Hộ Chiếu Tửu Lượng (Sign Up Live Generator)
+  const [signupNickname, setSignupNickname] = useState('Chiến Thần Bờ Kè');
+  const [signupEmail, setSignupEmail] = useState('chienthan_boke@nhau.vn');
+  const [signupArchetype, setSignupArchetype] = useState(DRUNK_ARCHETYPES[0]);
+  const [signupTolerance, setSignupTolerance] = useState(75); // 0 -> 100%
+
+  // State Nhậu Chui / Vào Nhanh Không Cần Thẻ
+  const [guestNickname, setGuestNickname] = useState('Thần Cồn Quận 4');
+  const [guestRoomPin, setGuestRoomPin] = useState('686868');
+
+  // State Captcha Rót Bia & Xác nhận 18+
+  const [ageVerified, setAgeVerified] = useState(true);
+  const [beerPourLevel, setBeerPourLevel] = useState(0); // 0 -> 100%
+  const [isPouringCaptcha, setIsPouringCaptcha] = useState(false);
+  const [captchaStatus, setCaptchaStatus] = useState('IDLE'); // 'IDLE' | 'POURING' | 'SUCCESS' | 'OVERFLOW'
+  const [authErrorMsg, setAuthErrorMsg] = useState('');
+
+  // --- TRẠNG THÁI CHUNG CỦA GAME & NGƯỜI CHƠI ---
+  const [cameraMode, setCameraMode] = useState('LOBBY_CAM'); // 'LOBBY_CAM' | 'WARDROBE_CAM' | 'MINIGAME_CAM' | 'BRAWL_CAM'
+  const [activeModal, setActiveModal] = useState(null); // 'HOST' | 'PIN' | 'RECEIPT' | 'WIFE_CALL' | 'KARAOKE' | 'POLICE' | null
+  const [alcoholLevel, setAlcoholLevel] = useState(25); // 0 -> 100%
+  const [bladderLevel, setBladderLevel] = useState(35); // 0 -> 100% (Bụng bia)
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [bottleCaps, setBottleCaps] = useState(1850);
+  const [cashLua, setCashLua] = useState(420);
+  const [toastMsg, setToastMsg] = useState(null);
+
+  // Tùy chỉnh Nhân Vật Chính (Tủ Đồ Vỉa Hè 3D)
+  const [selectedSpecies, setSelectedSpecies] = useState(SPECIES_LIST[0]);
+  const [selectedHat, setSelectedHat] = useState('none');
+  const [customShirtHex, setCustomShirtHex] = useState('#ffffff');
+
+  // Trạng thái 4 ghế nhựa quanh bàn Inox
+  const [seats, setSeats] = useState([
+    {
+      seatIndex: 0,
+      isSelf: true,
+      occupied: true,
+      name: 'Bạn (Chủ Bàn)',
+      rank: 'Tửu Tướng Bất Bại',
+      species: SPECIES_LIST[0],
+      ready: true,
+      cansOnHead: 0,
+      hasStickyNote: false,
+      slumped: false,
+      bubble: {
+        text: 'Anh em ngồi vào ghế nhựa đỏ đi! Hô 1, 2, 3 Dzô nào!',
+        style: 'NORMAL',
+        replaced: false
+      }
+    },
+    {
+      seatIndex: 1,
+      isSelf: false,
+      occupied: true,
+      name: 'Hùng Đại Ca',
+      rank: 'Chúa Tể Gắp Mồi',
+      species: SPECIES_LIST[1],
+      ready: true,
+      cansOnHead: 0,
+      hasStickyNote: false,
+      slumped: false,
+      bubble: {
+        text: 'Đợi tí tao đang nhắm bắn hạt đậu phộng vào ly mày!',
+        style: 'NORMAL',
+        replaced: false
+      }
+    },
+    {
+      seatIndex: 2,
+      isSelf: false,
+      occupied: true,
+      name: 'Phong Lươn Lẹo',
+      rank: 'Thánh Trốn Bill',
+      species: SPECIES_LIST[2],
+      ready: true,
+      cansOnHead: 0,
+      hasStickyNote: false,
+      slumped: false,
+      bubble: {
+        text: 'Tối nay đứa nào rủ nhậu thì đứa đó bao hết nhé!',
+        style: 'NORMAL',
+        replaced: false
+      }
+    },
+    {
+      seatIndex: 3,
+      isSelf: false,
+      occupied: false,
+      name: 'Vịt Chiếu Mới',
+      rank: 'Tấm Chiếu Mới',
+      species: SPECIES_LIST[3],
+      ready: false,
+      cansOnHead: 0,
+      hasStickyNote: false,
+      slumped: false,
+      bubble: {
+        text: 'Cho mình uống bia pha 80% trà đá được không...',
+        style: 'NORMAL',
+        replaced: false
+      }
+    }
+  ]);
+
+  // Tọa độ 2D trên màn hình của 4 đầu nhân vật 3D (để gắn Bong bóng Chat 3D)
+  const [bubbleCoords, setBubbleCoords] = useState([
+    { x: 50, y: 50, visible: true },
+    { x: 50, y: 50, visible: true },
+    { x: 50, y: 50, visible: true },
+    { x: 50, y: 50, visible: false }
+  ]);
+
+  // Trạng thái Bàn Nhậu & Minigame Xí Ngầu Nói Dối
+  const [isTableFlipped, setIsTableFlipped] = useState(false);
+  const [isCheersClinking, setIsCheersClinking] = useState(false);
+  const [diceValues, setDiceValues] = useState([6, 4, 6, 2, 5]);
+  const [isRollingDice, setIsRollingDice] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [pinCode, setPinCode] = useState('6868');
+
+  // Sự kiện Ngẫu nhiên ("Nóc Nhà Gọi Điện", "Công An Phường", "Gọi NY Cũ")
+  const [wifeCallNoise, setWifeCallNoise] = useState(18);
+  const [wifeCallTimer, setWifeCallTimer] = useState(6);
+  const [policeClicks, setPoliceClicks] = useState(0);
+  const [exCallAlert, setExCallAlert] = useState(false);
+
+  // Luật bàn nhậu (Thực đơn Quán Tư Đực)
+  const [roomSettings, setRoomSettings] = useState({
+    map: 'Quán Tư Đực - Bờ Kè',
+    drunkSpeed: 'Uống Tới Bến (Chuẩn)',
+    micCheers: true,
+    wifeCallEvent: true,
+    policePatrol: true,
+    billFight: true
+  });
+
+  // --- LOGIC VÒI RÓT BIA CAPTCHA (GIỮ NÚT ĐỂ RÓT BIA VÀO VẠCH 70% - 95%) ---
+  useEffect(() => {
+    if (!isPouringCaptcha) return;
+    const interval = setInterval(() => {
+      setBeerPourLevel((prev) => {
+        const next = prev + 3.2;
+        sfx.playPouringTick(next / 100);
+        if (next >= 100) {
+          setIsPouringCaptcha(false);
+          setCaptchaStatus('OVERFLOW');
+          sfx.playBuzzer();
+          return 100;
+        }
+        return next;
+      });
+    }, 55);
+    return () => clearInterval(interval);
+  }, [isPouringCaptcha]);
+
+  const handleStartPourCaptcha = () => {
+    if (captchaStatus === 'OVERFLOW') {
+      setBeerPourLevel(0);
+    }
+    setAuthErrorMsg('');
+    setCaptchaStatus('POURING');
+    setIsPouringCaptcha(true);
+  };
+
+  const handleStopPourCaptcha = () => {
+    if (!isPouringCaptcha) return;
+    setIsPouringCaptcha(false);
+    if (beerPourLevel >= 70 && beerPourLevel <= 95) {
+      setCaptchaStatus('SUCCESS');
+      sfx.playClink();
+    } else if (beerPourLevel > 95) {
+      setCaptchaStatus('OVERFLOW');
+      sfx.playBuzzer();
+    } else {
+      setCaptchaStatus('IDLE');
+    }
+  };
+
+  const handleResetPourCaptcha = () => {
+    sfx.playPop();
+    setBeerPourLevel(0);
+    setCaptchaStatus('IDLE');
+    setAuthErrorMsg('');
+  };
+
+  // --- XỬ LÝ SUBMIT ĐĂNG NHẬP / ĐĂNG KÝ / VÀO BÀN NHANH ---
+  const handleCompleteAuthSubmit = (e) => {
+    if (e) e.preventDefault();
+    setAuthErrorMsg('');
+
+    if (!ageVerified) {
+      sfx.playBuzzer();
+      setAuthErrorMsg('⚠️ Ê khoan! Phải tích cam kết đủ 18+ và không gọi cho Người Yêu Cũ khi say!');
+      return;
+    }
+
+    if (captchaStatus !== 'SUCCESS') {
+      sfx.playBuzzer();
+      setAuthErrorMsg('🍺 Bạn chưa qua bài test tỉnh táo! Hãy giữ nút Rót Bia dừng đúng vạch vàng (70% - 95%)!');
+      return;
+    }
+
+    sfx.playBottleCapOpen();
+    setTimeout(() => sfx.playClink(), 180);
+
+    // Đồng bộ tên và nhân vật người chơi vào Ghế số 0 trên bàn nhậu 3D
+    const chosenName =
+      authTab === 'SIGNUP'
+        ? signupNickname || 'Chiến Thần Bờ Kè'
+        : authTab === 'GUEST'
+        ? guestNickname || 'Khách Nhậu Chui'
+        : loginIdentifier.split('@')[0] || 'Cậu Vàng Đô Lực';
+
+    const rankByTolerance =
+      signupTolerance >= 85
+        ? 'Tửu Tướng Bất Bại'
+        : signupTolerance >= 50
+        ? 'Kiện Tướng Bàn Nhậu'
+        : 'Tấm Chiếu Mới';
+
+    setSeats((prev) =>
+      prev.map((s, idx) =>
+        idx === 0
+          ? {
+              ...s,
+              name: chosenName,
+              rank: authTab === 'SIGNUP' ? rankByTolerance : s.rank,
+              species: selectedSpecies,
+              bubble: {
+                text: `Mới làm thủ tục vào bàn! Hôm nay ${chosenName} chấp hết cả bàn nhé! 🍻`,
+                style: 'NORMAL',
+                replaced: false
+              }
+            }
+          : s
+      )
+    );
+
+    setBottleCaps((c) => c + 500);
+    setAuthSuccessModal(true);
+  };
+
+  // Tạo JSON Payload thời gian thực chuẩn Schema MongoDB (`players` collection)
+  const liveMongoDocument = {
+    _id: 'ObjectId("6729c8f4a91d04e8b2106868")',
+    authMode: authTab,
+    username:
+      authTab === 'SIGNUP'
+        ? signupNickname
+        : authTab === 'GUEST'
+        ? guestNickname
+        : loginIdentifier.split('@')[0],
+    email: authTab === 'GUEST' ? null : authTab === 'SIGNUP' ? signupEmail : loginIdentifier,
+    roomPinJoin: authTab === 'GUEST' ? guestRoomPin : null,
+    wallet: {
+      bottleCaps: bottleCaps + 500,
+      rice: cashLua
+    },
+    equipped: {
+      character: `char_${selectedSpecies.id}`,
+      hat: selectedHat,
+      shirtHex: customShirtHex,
+      shoes: 'shoes_dep_to_ong_gold_9999'
+    },
+    alcoholicPassport: {
+      drunkArchetype: signupArchetype.id,
+      declaredTolerance: `${signupTolerance}%`,
+      rankTier:
+        signupTolerance >= 85 ? 'THAN_CON' : signupTolerance >= 50 ? 'KIEN_TUONG' : 'TAM_CHIEU_MOI',
+      captchaPourAccuracy: `${Math.round(beerPourLevel)}%`,
+      committedNoExCall: ageVerified,
+      stamp: 'DA_KIEM_DINH_DO_LAY_2026'
+    },
+    sessionJwtPreview: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.QUAN_TU_DUC_BO_KE.8899',
+    createdAt: new Date().toISOString()
+  };
+
+  // --- REFS CHO THREE.JS SCENE & VẬT LÝ ---
+  const mountRef = useRef(null);
+  const sceneRef = useRef(null);
+  const charsRef = useRef([]);
+  const tableGroupRef = useRef(null);
+  const projectilesRef = useRef([]);
+  const particlesRef = useRef([]);
+  const stateBridgeRef = useRef({
+    cameraMode: 'LOBBY_CAM',
+    alcoholLevel: 25,
+    bladderLevel: 35,
+    isCheersClinking: false,
+    isTableFlipped: false,
+    seats: seats,
+    karaokeDisco: false,
+    policeSiren: false,
+    orbitYaw: 0
+  });
+
+  // Cập nhật Bridge Ref để vòng lặp 60FPS của Three.js đọc được state mới nhất
+  useEffect(() => {
+    stateBridgeRef.current = {
+      ...stateBridgeRef.current,
+      cameraMode,
+      alcoholLevel,
+      bladderLevel,
+      isCheersClinking,
+      isTableFlipped,
+      seats,
+      karaokeDisco: activeModal === 'KARAOKE',
+      policeSiren: activeModal === 'POLICE'
+    };
+  }, [
+    cameraMode,
+    alcoholLevel,
+    bladderLevel,
+    isCheersClinking,
+    isTableFlipped,
+    seats,
+    activeModal
+  ]);
+
+  // Đồng bộ Âm thanh
+  useEffect(() => {
+    sfx.enabled = soundEnabled;
+  }, [soundEnabled]);
+
+  // Kiểm tra tự động bật cảnh báo "Gọi Điện Người Yêu Cũ" khi độ cồn >= 85%
+  useEffect(() => {
+    if (alcoholLevel >= 85) {
+      setExCallAlert(true);
+    } else {
+      setExCallAlert(false);
+    }
+  }, [alcoholLevel]);
+
+  // Đếm ngược sự kiện "Nóc Nhà Gọi Điện Kiểm Tra"
+  useEffect(() => {
+    if (activeModal !== 'WIFE_CALL') return;
+    setWifeCallTimer(6);
+    setWifeCallNoise(22);
+    const timer = setInterval(() => {
+      setWifeCallTimer((t) => {
+        if (t <= 1) {
+          clearInterval(timer);
+          setActiveModal(null);
+          triggerToast('😮‍💨 Thoát nạn! Nóc nhà đã tin bạn đang tăng ca ở công ty!');
+          return 0;
+        }
+        return t - 1;
+      });
+      // Bạn bè trong bàn cố tình hò hét phá đám
+      setWifeCallNoise((n) => {
+        const next = Math.min(100, Math.max(10, n + (Math.random() * 26 - 8)));
+        if (next >= 92) {
+          clearInterval(timer);
+          setActiveModal(null);
+          launch3DSlipper(0); // Dép tổ ong khổng lồ bay từ ngoài đường vào mặt!
+          triggerToast('🩴 BỊ PHÁT HIỆN ĐI NHẬU! Dép tổ ong của Nóc Nhà vừa bay thẳng vào mặt!');
+        }
+        return Math.round(next);
+      });
+    }, 950);
+    return () => clearInterval(timer);
+  }, [activeModal]);
+
+  const triggerToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3400);
+  };
+
+  // ==========================================================================
+  // 5. KHỞI TẠO KHÔNG GIAN 3D QUÁN NHẬU VỈA HÈ (THREE.JS ENGINE)
+  // ==========================================================================
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    // Scene & Fog đêm vỉa hè Sài Gòn
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x090d16);
+    scene.fog = new THREE.FogExp2(0x090d16, 0.032);
+    sceneRef.current = scene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      100
+    );
+    camera.position.set(0, 5.2, 7.8);
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    // --- HỆ THỐNG ÁNH SÁNG QUÁN NHẬU ĐÊM ---
+    const ambientLight = new THREE.AmbientLight(0xffe4b5, 0.65);
+    scene.add(ambientLight);
+
+    // Đèn dây vàng ấm chiếu thẳng xuống bàn nhậu Inox
+    const warmSpotLight = new THREE.SpotLight(0xffb74d, 2.4, 22, Math.PI / 3, 0.45, 1);
+    warmSpotLight.position.set(0, 7.5, 1.5);
+    warmSpotLight.castShadow = true;
+    warmSpotLight.shadow.mapSize.width = 1024;
+    warmSpotLight.shadow.mapSize.height = 1024;
+    scene.add(warmSpotLight);
+
+    // Đèn Neon Hồng/Xanh từ biển hiệu Hiflex và Loa Kẹo Kéo
+    const neonLeftLight = new THREE.PointLight(0xf43f5e, 1.5, 12);
+    neonLeftLight.position.set(-4.5, 3.8, -3.5);
+    scene.add(neonLeftLight);
+
+    const neonRightLight = new THREE.PointLight(0x38bdf8, 1.4, 12);
+    neonRightLight.position.set(4.5, 3.8, -3.5);
+    scene.add(neonRightLight);
+
+    // --- MẶT ĐẤT VỈA HÈ XI MĂNG & LÒNG ĐƯỜNG NHỰA ---
+    const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+    const sidewalk = new THREE.Mesh(new THREE.PlaneGeometry(36, 26), sidewalkMat);
+    sidewalk.rotation.x = -Math.PI / 2;
+    sidewalk.receiveShadow = true;
+    scene.add(sidewalk);
+
+    // Vạch sơn trắng phân cách vỉa hè (Sự kiện Công An Phường dẹp vỉa hè)
+    const whiteLineMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    for (let x = -10; x <= 10; x += 1.6) {
+      const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.14), whiteLineMat);
+      dash.rotation.x = -Math.PI / 2;
+      dash.position.set(x, 0.01, 2.75);
+      scene.add(dash);
+    }
+
+    // Dây đèn LED bóng tròn vàng giăng ngang bầu trời đêm
+    const stringLightGroup = new THREE.Group();
+    const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    for (let i = -6; i <= 6; i++) {
+      const t = i / 6;
+      const sagY = 4.6 - Math.cos(t * 1.4) * 0.45;
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10), bulbMat);
+      bulb.position.set(i * 0.95, sagY, -1.2);
+      stringLightGroup.add(bulb);
+    }
+    scene.add(stringLightGroup);
+
+    // Két bia nhựa xanh/đỏ & Thùng loa kẹo kéo ở góc quán
+    const crateGeo = new THREE.BoxGeometry(0.75, 0.52, 0.55);
+    const greenCrateMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.7 });
+    const redCrateMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.7 });
+    [
+      [-2.8, 0.26, -1.5, greenCrateMat],
+      [-2.8, 0.78, -1.5, redCrateMat],
+      [2.9, 0.26, -1.2, redCrateMat]
+    ].forEach(([x, y, z, mat]) => {
+      const crate = new THREE.Mesh(crateGeo, mat);
+      crate.position.set(x, y, z);
+      crate.rotation.y = 0.3;
+      crate.castShadow = true;
+      scene.add(crate);
+    });
+
+    // --- BÀN NHẬU INOX TRUNG TÂM & ĐẠO CỤ TRÊN BÀN ---
+    const tableGroup = new THREE.Group();
+    scene.add(tableGroup);
+    tableGroupRef.current = tableGroup;
+
+    const inoxMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      metalness: 0.82,
+      roughness: 0.22
+    });
+
+    // Mặt bàn Inox tròn
+    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(1.65, 1.65, 0.08, 32), inoxMat);
+    tableTop.position.y = 1.18;
+    tableTop.castShadow = true;
+    tableTop.receiveShadow = true;
+    tableGroup.add(tableTop);
+
+    // 4 Chân bàn Inox
+    [
+      [-0.95, -0.95],
+      [0.95, -0.95],
+      [-0.95, 0.95],
+      [0.95, 0.95]
+    ].forEach(([lx, lz]) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 1.18, 10), inoxMat);
+      leg.position.set(lx, 0.59, lz);
+      leg.castShadow = true;
+      tableGroup.add(leg);
+    });
+
+    // 1. Tháp Bia Tươi 3 Lít (Phát sáng vàng óng ở tâm bàn)
+    const towerGroup = new THREE.Group();
+    towerGroup.position.set(0, 1.22, 0);
+    const towerBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.28, 0.18, 18),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a })
+    );
+    towerBase.position.y = 0.09;
+    const towerGlass = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.2, 0.95, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0xf59e0b,
+        emissive: 0xd97706,
+        emissiveIntensity: 0.35,
+        roughness: 0.15
+      })
+    );
+    towerGlass.position.y = 0.65;
+    const towerFoam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.205, 0.205, 0.12, 20),
+      new THREE.MeshStandardMaterial({ color: 0xffffff })
+    );
+    towerFoam.position.y = 1.15;
+    towerGroup.add(towerBase, towerGlass, towerFoam);
+    tableGroup.add(towerGroup);
+
+    // 2. Đĩa Đậu Phộng Rang Muối & Chân Gà Nướng
+    const plateMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 });
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.32, 0.05, 20), plateMat);
+    plate.position.set(-0.62, 1.24, 0.45);
+    tableGroup.add(plate);
+
+    const peanutMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 });
+    for (let i = 0; i < 14; i++) {
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), peanutMat);
+      p.scale.set(1.3, 0.8, 0.9);
+      p.position.set(
+        -0.62 + (Math.random() - 0.5) * 0.42,
+        1.29 + Math.random() * 0.05,
+        0.45 + (Math.random() - 0.5) * 0.42
+      );
+      tableGroup.add(p);
+    }
+
+    // 3. Xô Đá Inox & Khăn Lạnh
+    const iceBucket = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, 0.38, 18), inoxMat);
+    iceBucket.position.set(0.68, 1.41, -0.45);
+    tableGroup.add(iceBucket);
+
+    // --- 4 GHẾ ĐẨU NHỰA ĐỎ QUỐC DÂN & 4 NHÂN VẬT THÚ BÔNG 3D ---
+    const seatCoords = [
+      { x: -1.85, z: 1.35, rotY: Math.PI * 0.32 }, // Ghế 0: Người chơi chính (Trái trước)
+      { x: -1.65, z: -1.35, rotY: Math.PI * 0.68 }, // Ghế 1: Hùng Đại Ca (Trái sau)
+      { x: 1.65, z: -1.35, rotY: -Math.PI * 0.68 }, // Ghế 2: Phong Lươn Lẹo (Phải sau)
+      { x: 1.85, z: 1.35, rotY: -Math.PI * 0.32 } // Ghế 3: Vịt Chiếu Mới (Phải trước)
+    ];
+
+    const redPlasticMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 });
+    const builtChars = [];
+
+    seatCoords.forEach((sc, idx) => {
+      const seatAnchor = new THREE.Group();
+      seatAnchor.position.set(sc.x, 0, sc.z);
+      seatAnchor.rotation.y = sc.rotY;
+      scene.add(seatAnchor);
+
+      // Ghế đẩu nhựa đỏ có lỗ tròn ở giữa
+      const stoolTop = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.08, 0.76), redPlasticMat);
+      stoolTop.position.y = 0.62;
+      stoolTop.castShadow = true;
+      seatAnchor.add(stoolTop);
+
+      [
+        [-0.3, -0.3],
+        [0.3, -0.3],
+        [-0.3, 0.3],
+        [0.3, 0.3]
+      ].forEach(([sx, sz]) => {
+        const sLeg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.045, 0.06, 0.62, 8),
+          redPlasticMat
+        );
+        sLeg.position.set(sx, 0.31, sz);
+        seatAnchor.add(sLeg);
+      });
+
+      // Dựng Model Nhân vật Thú Bông 3D
+      const initialSeat = stateBridgeRef.current.seats[idx];
+      const charObj = createPlushieCharacterMesh(
+        initialSeat.species,
+        idx === 0 ? selectedHat : 'none'
+      );
+      charObj.root.position.y = 0.08;
+      charObj.seatAnchor = seatAnchor;
+      charObj.basePos = new THREE.Vector3(sc.x, 0, sc.z);
+      charObj.baseRotY = sc.rotY;
+      charObj.knockbackVel = 0;
+      seatAnchor.add(charObj.root);
+      builtChars.push(charObj);
+    });
+
+    charsRef.current = builtChars;
+
+    // --- XE MÁY CHẠY VỤT QUA NGOÀI ĐƯỜNG PHÍA SAU ---
+    const bikeGroup = new THREE.Group();
+    const bikeBody = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.65, 0.45),
+      new THREE.MeshStandardMaterial({ color: 0xef4444 })
+    );
+    bikeBody.position.y = 0.5;
+    const headlight = new THREE.PointLight(0xfef08a, 2.2, 8);
+    headlight.position.set(0.8, 0.7, 0);
+    bikeGroup.add(bikeBody, headlight);
+    bikeGroup.position.set(-18, 0, -6.5);
+    scene.add(bikeGroup);
+
+    // --- XỬ LÝ KÉO CHUỘT XOAY CAMERA 360 ĐỘ ---
+    let isDragging = false;
+    let prevX = 0;
+    const onPointerDown = (e) => {
+      isDragging = true;
+      prevX = e.clientX;
+    };
+    const onPointerMove = (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevX;
+      prevX = e.clientX;
+      stateBridgeRef.current.orbitYaw -= dx * 0.0065;
+    };
+    const onPointerUp = () => {
+      isDragging = false;
+    };
+
+    const domElem = renderer.domElement;
+    domElem.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    // --- VÒNG LẶP ANIMATION 60 FPS (RAGDOLL PHYSICS + PARTICLES + CAMERA LERP) ---
+    const clock = new THREE.Clock();
+    let frameId;
+    let lastBubbleSync = 0;
+
+    const targetCamPos = new THREE.Vector3();
+    const targetLookAt = new THREE.Vector3();
+    const currentLookAt = new THREE.Vector3(0, 1.4, 0);
+
+    const animate = () => {
+      frameId = requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
+      const bridge = stateBridgeRef.current;
+
+      // 1. Điều khiển Góc Nhìn Camera (Lobby / Wardrobe / Minigame / Brawl + Độ Say)
+      const drunkFactor = Math.max(0, (bridge.alcoholLevel - 30) / 70); // 0 -> 1
+      const swayX = Math.sin(elapsed * 2.1) * drunkFactor * 0.42;
+      const swayY = Math.cos(elapsed * 1.6) * drunkFactor * 0.25;
+
+      if (bridge.cameraMode === 'WARDROBE_CAM') {
+        targetCamPos.set(-3.4, 2.5, 3.3);
+        targetLookAt.set(-1.85, 1.45, 1.35);
+      } else if (bridge.cameraMode === 'MINIGAME_CAM') {
+        targetCamPos.set(0, 5.4, 2.6);
+        targetLookAt.set(0, 1.25, 0);
+      } else if (bridge.cameraMode === 'BRAWL_CAM' || bridge.isTableFlipped) {
+        targetCamPos.set(Math.sin(elapsed * 0.5) * 2.5, 6.2, 9.2);
+        targetLookAt.set(0, 1.8, 0);
+      } else {
+        // LOBBY_CAM có hỗ trợ xoay chuột 360 độ
+        const radius = bridge.isCheersClinking ? 5.6 : 7.6;
+        const yaw = bridge.orbitYaw;
+        targetCamPos.set(
+          Math.sin(yaw) * radius + swayX,
+          (bridge.isCheersClinking ? 3.8 : 4.8) + swayY,
+          Math.cos(yaw) * radius
+        );
+        targetLookAt.set(swayX * 0.4, 1.45, 0);
+      }
+
+      camera.position.lerp(targetCamPos, 0.06);
+      currentLookAt.lerp(targetLookAt, 0.08);
+      camera.lookAt(currentLookAt);
+
+      // 2. Hiệu ứng Đèn Loa Kẹo Kéo hoặc Còi Công An Phường
+      if (bridge.karaokeDisco) {
+        neonLeftLight.color.setHSL((elapsed * 0.8) % 1, 0.9, 0.55);
+        neonRightLight.color.setHSL(((elapsed * 0.8) + 0.5) % 1, 0.9, 0.55);
+        neonLeftLight.intensity = 3.2;
+        neonRightLight.intensity = 3.2;
+      } else if (bridge.policeSiren) {
+        const isRed = Math.floor(elapsed * 8) % 2 === 0;
+        neonLeftLight.color.setHex(isRed ? 0xff0000 : 0x0044ff);
+        neonRightLight.color.setHex(isRed ? 0x0044ff : 0xff0000);
+        neonLeftLight.intensity = 4.0;
+        neonRightLight.intensity = 4.0;
+      } else {
+        neonLeftLight.color.setHex(0xf43f5e);
+        neonRightLight.color.setHex(0x38bdf8);
+        neonLeftLight.intensity = 1.5;
+        neonRightLight.intensity = 1.4;
+      }
+
+      // 3. Hoạt ảnh Ragdoll của 4 Nhân Vật theo Độ Cồn & Bụng Bia
+      charsRef.current.forEach((ch, idx) => {
+        const seatInfo = bridge.seats[idx];
+        ch.root.visible = seatInfo.occupied;
+        if (!seatInfo.occupied) return;
+
+        const charAlcohol = idx === 0 ? bridge.alcoholLevel : Math.min(95, bridge.alcoholLevel * 0.85 + 15);
+        const wobbleAmp = (charAlcohol / 100) * 0.35;
+
+        // Má hồng đỏ ửng khi say
+        ch.blushMat.opacity = Math.min(0.85, Math.max(0, (charAlcohol - 25) / 60));
+
+        // Bụng Bia phình to theo chỉ số Bladder
+        const bellyScale = idx === 0 ? 1 + (bridge.bladderLevel / 100) * 0.75 : 1.15;
+        ch.bellyMesh.scale.set(bellyScale, bellyScale, bellyScale);
+
+        // Giấy Note dán trán
+        ch.stickyNoteMesh.visible = seatInfo.hasStickyNote || (idx === 0 && selectedHat === 'sticky_note');
+
+        // Phản lực khi bị Dép Tổ Ong hoặc Đậu Phộng ném trúng đầu
+        if (ch.knockbackVel > 0.01) {
+          ch.torsoPivot.rotation.x = -ch.knockbackVel;
+          ch.knockbackVel *= 0.88;
+        } else if (charAlcohol >= 95 || seatInfo.slumped) {
+          // Gục mặt xuống bàn Inox hoặc ngã ngửa ra sau ghế nhựa
+          ch.torsoPivot.rotation.x = THREE.MathUtils.lerp(ch.torsoPivot.rotation.x, 1.05, 0.08);
+          ch.torsoPivot.rotation.z = Math.sin(elapsed * 1.2 + idx) * 0.15;
+        } else if (bridge.isCheersClinking) {
+          // Nghiêng người về tâm bàn cụng ly "1, 2, 3 DZÔ!"
+          ch.torsoPivot.rotation.x = THREE.MathUtils.lerp(ch.torsoPivot.rotation.x, 0.42, 0.15);
+          ch.rightArmPivot.rotation.x = THREE.MathUtils.lerp(ch.rightArmPivot.rotation.x, -0.85, 0.18);
+        } else {
+          // Lắc lư Ragdoll tự nhiên trên ghế nhựa đỏ
+          ch.torsoPivot.rotation.x = Math.sin(elapsed * 2.4 + idx * 1.7) * wobbleAmp;
+          ch.torsoPivot.rotation.z = Math.cos(elapsed * 1.9 + idx * 2.1) * wobbleAmp * 1.2;
+          ch.headGroup.rotation.z = Math.sin(elapsed * 3.1 + idx) * (0.08 + wobbleAmp * 0.5);
+          ch.rightArmPivot.rotation.x = Math.sin(elapsed * 2.8 + idx) * 0.22;
+        }
+      });
+
+      // 4. Hiệu ứng LẬT BÀN INOX (TABLE FLIP PHYSICS)
+      if (tableGroupRef.current) {
+        if (bridge.isTableFlipped) {
+          tableGroupRef.current.position.y = THREE.MathUtils.lerp(
+            tableGroupRef.current.position.y,
+            2.4,
+            0.12
+          );
+          tableGroupRef.current.rotation.z = THREE.MathUtils.lerp(
+            tableGroupRef.current.rotation.z,
+            1.65,
+            0.1
+          );
+          tableGroupRef.current.rotation.x = THREE.MathUtils.lerp(
+            tableGroupRef.current.rotation.x,
+            0.55,
+            0.1
+          );
+        } else {
+          tableGroupRef.current.position.y = THREE.MathUtils.lerp(
+            tableGroupRef.current.position.y,
+            0,
+            0.12
+          );
+          tableGroupRef.current.rotation.z = THREE.MathUtils.lerp(
+            tableGroupRef.current.rotation.z,
+            0,
+            0.12
+          );
+          tableGroupRef.current.rotation.x = THREE.MathUtils.lerp(
+            tableGroupRef.current.rotation.x,
+            0,
+            0.12
+          );
+        }
+      }
+
+      // 5. Cập nhật Đạn Vật Lý 3D (Đậu phộng, Dép tổ ong, Đá lạnh bay qua bàn)
+      for (let i = projectilesRef.current.length - 1; i >= 0; i--) {
+        const proj = projectilesRef.current[i];
+        proj.t += 0.045;
+        if (proj.t >= 1) {
+          // Trúng mục tiêu -> Tạo phản lực giật ngửa đầu Ragdoll
+          const targetChar = charsRef.current[proj.targetIdx];
+          if (targetChar) {
+            targetChar.knockbackVel = 0.85;
+          }
+          sfx.playSlap();
+          scene.remove(proj.mesh);
+          projectilesRef.current.splice(i, 1);
+        } else {
+          proj.mesh.position.lerpVectors(proj.start, proj.end, proj.t);
+          proj.mesh.position.y += Math.sin(proj.t * Math.PI) * 1.45; // Quỹ đạo Parabol
+          proj.mesh.rotation.x += 0.25;
+          proj.mesh.rotation.z += 0.2;
+        }
+      }
+
+      // 6. Cập nhật Hạt Bọt Bia Văng Tung Tóe (Foam Splash Particles)
+      for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+        const p = particlesRef.current[i];
+        p.mesh.position.add(p.vel);
+        p.vel.y -= 0.008;
+        p.life -= 0.025;
+        p.mesh.scale.setScalar(Math.max(0.01, p.life));
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          particlesRef.current.splice(i, 1);
+        }
+      }
+
+      // 7. Xe máy chạy vụt qua ngoài đường
+      bikeGroup.position.x += 0.16;
+      if (bikeGroup.position.x > 22) bikeGroup.position.x = -22;
+
+      renderer.render(scene, camera);
+
+      // 8. Đồng bộ tọa độ 3D của đầu nhân vật sang tọa độ 2D cho Bong bóng Chat (20 lần/giây)
+      if (elapsed - lastBubbleSync > 0.05) {
+        lastBubbleSync = elapsed;
+        const nextCoords = charsRef.current.map((ch, idx) => {
+          if (!bridge.seats[idx].occupied) return { x: 0, y: 0, visible: false };
+          const worldPos = new THREE.Vector3();
+          ch.headGroup.getWorldPosition(worldPos);
+          worldPos.y += 0.88 + bridge.seats[idx].cansOnHead * 0.22;
+          worldPos.project(camera);
+          const x = (worldPos.x * 0.5 + 0.5) * container.clientWidth;
+          const y = (-(worldPos.y * 0.5) + 0.5) * container.clientHeight;
+          return { x, y, visible: worldPos.z < 1 };
+        });
+        setBubbleCoords(nextCoords);
+      }
+    };
+
+    animate();
+
+    // Resize Handler
+    const handleResize = () => {
+      if (!container) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      domElem.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('resize', handleResize);
+      renderer.dispose();
+    };
+  }, []);
+
+  // Cập nhật Skin / Màu áo / Phụ kiện của Nhân vật số 0 trong thời gian thực
+  useEffect(() => {
+    const playerChar = charsRef.current[0];
+    if (!playerChar) return;
+    playerChar.bodyMat.color.setHex(selectedSpecies.bodyColor);
+    playerChar.shirtMat.color.set(customShirtHex);
+    playerChar.stickyNoteMesh.visible = selectedHat === 'sticky_note' || seats[0].hasStickyNote;
+  }, [selectedSpecies, customShirtHex, selectedHat, seats]);
+
+  // ==========================================================================
+  // 6. CÁC HÀNH ĐỘNG VẬT LÝ 3D TRÊN BÀN NHẬU (SANDBOX ACTIONS)
+  // ==========================================================================
+
+  // Tạo hiệu ứng bọt bia văng tung tóe ở tâm bàn 3D
+  const spawnFoamSplash3D = () => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const foamMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    for (let i = 0; i < 28; i++) {
+      const drop = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), foamMat);
+      drop.position.set(0, 2.0, 0);
+      scene.add(drop);
+      particlesRef.current.push({
+        mesh: drop,
+        vel: new THREE.Vector3(
+          (Math.random() - 0.5) * 0.18,
+          Math.random() * 0.16 + 0.06,
+          (Math.random() - 0.5) * 0.18
+        ),
+        life: 1.0
+      });
+    }
+  };
+
+  // 1. Hô "1, 2, 3 DZÔ!" — Cả bàn nghiêng người cụng ly 3D + Tăng cồn & Bụng bia
+  const handleCheersClink3D = () => {
+    sfx.playClink();
+    setIsCheersClinking(true);
+    spawnFoamSplash3D();
+
+    setAlcoholLevel((prev) => Math.min(100, prev + 14));
+    setBladderLevel((prev) => Math.min(100, prev + 20));
+
+    setSeats((prev) =>
+      prev.map((s) =>
+        s.occupied
+          ? {
+              ...s,
+              bubble: {
+                text: '1... 2... 3... DZÔÔÔ 100%!! 🍻💦',
+                style: alcoholLevel > 60 ? 'WASTED' : 'TIPSY',
+                replaced: false
+              }
+            }
+          : s
+      )
+    );
+    triggerToast('🍻 CỤNG LY 100%! Độ Cồn +14% • Bụng Bia +20%');
+
+    setTimeout(() => {
+      setIsCheersClinking(false);
+    }, 1500);
+  };
+
+  // 2. Búng Đậu Phộng 3D (Peanut Sniper) vào mặt bạn nhậu
+  const launch3DPeanut = () => {
+    const scene = sceneRef.current;
+    if (!scene || charsRef.current.length < 2) return;
+    sfx.playPop();
+
+    const targetIdx = seats[1].occupied ? 1 : 2;
+    const start = new THREE.Vector3(-1.3, 1.6, 1.0);
+    const end = charsRef.current[targetIdx].basePos.clone().add(new THREE.Vector3(0, 1.5, 0));
+
+    const peanutMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 10, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd97706 })
+    );
+    peanutMesh.scale.set(1.4, 0.9, 0.9);
+    scene.add(peanutMesh);
+
+    projectilesRef.current.push({ mesh: peanutMesh, start, end, t: 0, targetIdx });
+
+    setSeats((prev) =>
+      prev.map((s, idx) =>
+        idx === targetIdx
+          ? {
+              ...s,
+              bubble: {
+                text: 'Á đù! Đứa nào búng hạt đậu phộng lọt vô ly bia tao vậy?! 🥜😡',
+                style: 'TIPSY',
+                replaced: false
+              }
+            }
+          : s
+      )
+    );
+    triggerToast(`🥜 HEADSHOT ĐẬU PHỘNG trúng ${seats[targetIdx].name}! Bắt buộc uống cạn!`);
+  };
+
+  // 3. Phi Dép Tổ Ong Vàng 3D
+  const launch3DSlipper = (forcedTargetIdx = null) => {
+    const scene = sceneRef.current;
+    if (!scene || charsRef.current.length < 3) return;
+    sfx.playPop();
+
+    const targetIdx = forcedTargetIdx !== null ? forcedTargetIdx : seats[2].occupied ? 2 : 1;
+    const start =
+      forcedTargetIdx === 0
+        ? new THREE.Vector3(0, 3.2, 5.5) // Dép từ ngoài đường của "Nóc nhà" bay vào
+        : new THREE.Vector3(-1.5, 1.5, 1.2);
+    const end = charsRef.current[targetIdx].basePos.clone().add(new THREE.Vector3(0, 1.65, 0));
+
+    const slipperMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.1, 0.56),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15 })
+    );
+    scene.add(slipperMesh);
+
+    projectilesRef.current.push({ mesh: slipperMesh, start, end, t: 0, targetIdx });
+    if (forcedTargetIdx === null) {
+      triggerToast(`🩴 Bạn vừa rút Dép Tổ Ong phi thẳng vào đầu ${seats[targetIdx].name}!`);
+    }
+  };
+
+  // 4. Chất Vỏ Lon Bia Lên Đầu & Dán Giấy Note Lên Trán Bạn Nhậu
+  const handleStackCanAndPrank = () => {
+    const targetIdx = 1;
+    const targetChar = charsRef.current[targetIdx];
+    if (!targetChar) return;
+    sfx.playClink();
+
+    const currentCans = seats[targetIdx].cansOnHead;
+    const canMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.24, 14),
+      new THREE.MeshStandardMaterial({
+        color: currentCans % 2 === 0 ? 0x16a34a : 0xeab308,
+        metalness: 0.6,
+        roughness: 0.3
+      })
+    );
+    canMesh.position.y = currentCans * 0.24 + 0.12;
+    canMesh.rotation.z = (Math.random() - 0.5) * 0.12;
+    targetChar.canStackGroup.add(canMesh);
+
+    setSeats((prev) =>
+      prev.map((s, idx) =>
+        idx === targetIdx
+          ? {
+              ...s,
+              cansOnHead: s.cansOnHead + 1,
+              hasStickyNote: true,
+              slumped: true,
+              bubble: {
+                text: `Khò khò... (Đang bị chất ${s.cansOnHead + 1} vỏ lon + Dán giấy "Bao Hết" lên trán) 😴`,
+                style: 'WASTED',
+                replaced: false
+              }
+            }
+          : s
+      )
+    );
+    triggerToast(
+      `🥫 Đã dán giấy "Bao Hết" & chất ${currentCans + 1} vỏ lon bia lên đầu ${seats[targetIdx].name}!`
+    );
+  };
+
+  // 5. LẬT BÀN INOX (ULTIMATE TABLE FLIP)
+  const handleToggleTableFlip = () => {
+    if (!isTableFlipped) {
+      sfx.playTableCrash();
+      spawnFoamSplash3D();
+      setIsTableFlipped(true);
+      setCameraMode('BRAWL_CAM');
+      triggerToast('💥 NỘ KHÍ XUNG THIÊN: BẠN VỪA HẤT TUNG BÀN INOX! HỖN CHIẾN TOÀN QUÁN!');
+    } else {
+      sfx.playPop();
+      setIsTableFlipped(false);
+      setCameraMode('LOBBY_CAM');
+      triggerToast('🧹 Phục vụ đã dọn lại bàn Inox mới!');
+    }
+  };
+
+  // 6. Chạy Đi Nhà Vệ Sinh (Giải quyết Bụng Bia)
+  const handleRunToWC = () => {
+    sfx.playPop();
+    setBladderLevel(0);
+    setAlcoholLevel((prev) => Math.max(0, prev - 15));
+    triggerToast('🚽 Đã chạy vào WC giải quyết nỗi buồn! Bụng Bia về 0% & Tỉnh rượu -15%!');
+  };
+
+  // 7. Gửi Chat lên Bong Bóng 3D trên đầu nhân vật
+  const handleSendChat = (customPhrase) => {
+    const raw = typeof customPhrase === 'string' ? customPhrase : chatInput;
+    if (!raw.trim()) return;
+    sfx.playPop();
+
+    const mutated = mutateDrunkText(raw, alcoholLevel);
+    setSeats((prev) =>
+      prev.map((s) => (s.isSelf ? { ...s, bubble: mutated } : s))
+    );
+    if (typeof customPhrase !== 'string') setChatInput('');
+  };
+
+  // 8. Lắc Xí Ngầu Nói Dối (Liar's Dice Minigame)
+  const handleRollLiarDice = () => {
+    sfx.playClink();
+    setIsRollingDice(true);
+    setTimeout(() => {
+      const nextDice = Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
+      setDiceValues(nextDice);
+      setIsRollingDice(false);
+      triggerToast(`🎲 Đã lắc cốc xí ngầu! Hãy nhìn lén và hô số lừa cả bàn!`);
+    }, 450);
+  };
+
+  return (
+    <div className="relative w-full h-screen overflow-hidden bg-slate-950 text-amber-50 select-none font-sans">
+      {/* =====================================================================
+          1. VIEWPORT 3D THREE.JS FULLSCREEN (BÀN NHẬU VỈA HÈ TƯƠNG TÁC)
+      ===================================================================== */}
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing z-0"
+        title="Kéo chuột trái/phải để xoay Camera 360 độ quanh bàn nhậu"
+      />
+
+      {/* =====================================================================
+          2. LỚP BONG BÓNG CHAT 3D PROJECTED TRÊN ĐẦU NHÂN VẬT
+      ===================================================================== */}
+      <div
+        className={`absolute inset-0 pointer-events-none z-10 overflow-hidden transition-opacity duration-500 ${
+          !isAuthenticated ? 'opacity-25 blur-[1px]' : 'opacity-100'
+        }`}
+      >
+        {seats.map((seat, idx) => {
+          const coord = bubbleCoords[idx];
+          if (!seat.occupied || !coord || !coord.visible) return null;
+          const isDrunkBubble = (seat.isSelf ? alcoholLevel > 65 : false) || seat.bubble.style === 'WASTED';
+
+          return (
+            <div
+              key={seat.seatIndex}
+              style={{
+                left: `${coord.x}px`,
+                top: `${coord.y}px`,
+                transform: 'translate(-50%, -100%)'
+              }}
+              className="absolute transition-all duration-75 pointer-events-auto"
+            >
+              <div
+                className={`relative px-3 py-1.5 rounded-2xl text-xs font-extrabold max-w-[200px] text-center shadow-[0_8px_25px_rgba(0,0,0,0.65)] border-2 ${
+                  isDrunkBubble
+                    ? 'bg-rose-100 text-rose-950 border-rose-500 -rotate-2 animate-bounce'
+                    : 'bg-white/95 text-slate-900 border-amber-400'
+                }`}
+              >
+                {seat.bubble.replaced && (
+                  <span className="block text-[9px] font-black uppercase text-rose-600">
+                    ⚡ [Rượu Vào Lời Ra]:
+                  </span>
+                )}
+                <p className="leading-snug break-words">"{seat.bubble.text}"</p>
+                <div className="w-2.5 h-2.5 bg-inherit border-r-2 border-b-2 border-inherit rotate-45 absolute -bottom-1.5 left-1/2 -translate-x-1/2" />
+              </div>
+
+              {/* Nhãn Tên & Rank ngay dưới Bong Bóng */}
+              <div className="mt-2 flex items-center justify-center gap-1">
+                <span className="bg-slate-950/85 backdrop-blur-xs text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full text-[10px] font-black shadow">
+                  {seat.species.emoji} {seat.name}
+                </span>
+                {seat.cansOnHead > 0 && (
+                  <span className="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-black">
+                    🥫x{seat.cansOnHead}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* =====================================================================
+          TOAST THÔNG BÁO SỰ KIỆN GIỮA MÀN HÌNH
+      ===================================================================== */}
+      {toastMsg && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-slate-950 font-black px-5 py-2 rounded-full shadow-[0_0_35px_rgba(245,158,11,0.9)] border-2 border-white flex items-center gap-2 animate-bounce text-xs sm:text-sm">
+          <Sparkles className="w-4 h-4 fill-slate-950 shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* =====================================================================
+          CẢNH BÁO QTE 85% CỒN: TỰ ĐỘNG RÚT ĐIỆN THOẠI GỌI NGƯỜI YÊU CŨ!
+      ===================================================================== */}
+      {exCallAlert && (
+        <div className="fixed top-32 left-1/2 -translate-x-1/2 z-40 bg-rose-600/95 text-white border-2 border-yellow-300 px-4 py-2.5 rounded-2xl shadow-[0_0_30px_rgba(225,29,72,0.9)] flex items-center gap-3 animate-pulse">
+          <PhoneIncoming className="w-5 h-5 text-yellow-300 animate-bounce shrink-0" />
+          <div className="text-xs">
+            <p className="font-black uppercase text-yellow-200">
+              💔 CẢNH BÁO CỒN {alcoholLevel}%: ĐANG BẤM SỐ "NGƯỜI YÊU CŨ"!
+            </p>
+            <p className="text-[11px] text-rose-100">
+              Tin nhắn đang gõ: "Em ngủ chưa... anh nhớ em quá..."
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              sfx.playSlap();
+              setAlcoholLevel(60);
+              setExCallAlert(false);
+              triggerToast('📱 Đã giật phăng điện thoại ném vào xô đá! Cứu thành công một pha quê độ!');
+            }}
+            className="bg-yellow-300 hover:bg-white text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl shadow transition shrink-0"
+          >
+            GIẬT ĐIỆN THOẠI!
+          </button>
+        </div>
+      )}
+
+      {/* =====================================================================
+          3. GIAO DIỆN HUD CHÍNH (TOP BAR + LEFT MENU + RIGHT SANDBOX + BOTTOM DOCK)
+      ===================================================================== */}
+      <div className="relative z-20 w-full h-full flex flex-col justify-between p-3 sm:p-4 pointer-events-none">
+        {/* --- TOP BAR: PROFILE + THANH ĐỘ CỒN + THANH BỤNG BIA + ĐẠO DIỄN SỰ KIỆN --- */}
+        <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-2.5 bg-slate-950/80 backdrop-blur-md border border-amber-500/35 rounded-2xl px-3.5 py-2 shadow-2xl">
+          {/* Hồ sơ & Rank */}
+          <div
+            onClick={() => setActiveModal('RECEIPT')}
+            className="flex items-center gap-2.5 cursor-pointer group hover:bg-slate-800/70 p-1 rounded-xl transition"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center text-2xl border-2 border-yellow-200 shadow group-hover:scale-105 transition">
+              {selectedSpecies.emoji}
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-black text-xs sm:text-sm text-white group-hover:text-amber-300">
+                  Chiến Thần Bờ Kè
+                </span>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-400/40 px-1.5 py-0.5 rounded-md font-bold">
+                  🏆 Tửu Tướng
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Click xem Hóa Đơn Bóc Phốt • Kéo chuột xoay 3D
+              </p>
+            </div>
+          </div>
+
+          {/* THANH ĐỘ CỒN (DRUNK METER) & THANH BỤNG BIA (BLADDER METER) */}
+          <div className="flex flex-wrap items-center gap-3 bg-slate-900/95 border border-amber-500/30 px-3 py-1.5 rounded-xl">
+            {/* Độ Cồn */}
+            <div className="flex flex-col w-40 sm:w-48">
+              <div className="flex justify-between text-[10px] font-black uppercase">
+                <span className="text-amber-300 flex items-center gap-1">
+                  <Flame className="w-3 h-3 text-orange-500" /> Độ Cồn (Test Say):
+                </span>
+                <span
+                  className={
+                    alcoholLevel > 75
+                      ? 'text-rose-400 animate-pulse'
+                      : alcoholLevel > 35
+                      ? 'text-amber-300'
+                      : 'text-emerald-300'
+                  }
+                >
+                  {alcoholLevel}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={alcoholLevel}
+                onChange={(e) => setAlcoholLevel(Number(e.target.value))}
+                className="w-full accent-amber-500 cursor-pointer h-1.5 mt-1"
+              />
+            </div>
+
+            {/* Bụng Bia (Bladder) */}
+            <div className="flex items-center gap-2 border-l border-slate-700 pl-3">
+              <div className="w-28">
+                <div className="flex justify-between text-[10px] font-black uppercase">
+                  <span className="text-sky-300">💦 Bụng Bia:</span>
+                  <span className="text-sky-200">{bladderLevel}%</span>
+                </div>
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-1 border border-slate-700">
+                  <div
+                    style={{ width: `${bladderLevel}%` }}
+                    className={`h-full transition-all ${
+                      bladderLevel >= 80 ? 'bg-rose-500 animate-pulse' : 'bg-sky-400'
+                    }`}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleRunToWC}
+                className={`px-2.5 py-1.5 rounded-lg font-black text-[10px] transition ${
+                  bladderLevel >= 75
+                    ? 'bg-rose-600 text-white animate-bounce shadow-[0_0_15px_rgba(225,29,72,0.8)]'
+                    : 'bg-slate-800 hover:bg-sky-500 hover:text-slate-950 text-sky-300'
+                }`}
+                title="Giải quyết bụng bia đang phình to"
+              >
+                🚽 Đi WC
+              </button>
+            </div>
+          </div>
+
+          {/* THANH KÍCH HOẠT SỰ KIỆN ĐƯỜNG PHỐ (RANDOM EVENT TRIGGERS) */}
+          <div className="hidden xl:flex items-center gap-1.5 bg-slate-900/90 border border-rose-500/30 px-2.5 py-1 rounded-xl">
+            <span className="text-[10px] font-black uppercase text-rose-300 mr-1">
+              Test Sự Kiện:
+            </span>
+            <button
+              onClick={() => {
+                sfx.playSiren();
+                setActiveModal('WIFE_CALL');
+              }}
+              className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500 hover:text-white border border-rose-400/40 text-rose-200 text-[10px] font-extrabold transition"
+            >
+              📱 Nóc Nhà Gọi
+            </button>
+            <button
+              onClick={() => {
+                sfx.playPop();
+                setActiveModal('KARAOKE');
+              }}
+              className="px-2 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500 hover:text-white border border-purple-400/40 text-purple-200 text-[10px] font-extrabold transition"
+            >
+              🔊 Loa Kẹo Kéo
+            </button>
+            <button
+              onClick={() => {
+                sfx.playSiren();
+                setPoliceClicks(0);
+                setActiveModal('POLICE');
+              }}
+              className="px-2 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500 hover:text-slate-950 border border-sky-400/40 text-sky-200 text-[10px] font-extrabold transition"
+            >
+              🚨 Phường Dẹp
+            </button>
+          </div>
+
+          {/* Tiền tệ & Bật/Tắt Âm Thanh */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-amber-500/30 px-2.5 py-1 rounded-xl text-xs font-black text-amber-300">
+              <span>🪙</span>
+              <span>{bottleCaps.toLocaleString()}</span>
+            </div>
+            <div className="hidden sm:flex items-center gap-1.5 bg-slate-900 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-xs font-black text-emerald-300">
+              <span>💵</span>
+              <span>{cashLua}</span>
+            </div>
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-200 transition"
+              title="Bật/Tắt hiệu ứng âm thanh cụng ly & đập bàn"
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => {
+                sfx.playPop();
+                setAuthSuccessModal(false);
+                setIsAuthenticated(false);
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-600/25 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 text-[11px] font-black transition"
+              title="Quay lại Cổng Quán Nhậu (Màn hình Login / Sign Up)"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Cổng Quán</span>
+            </button>
+          </div>
+        </header>
+
+        {/* --- MIDDLE SECTION: CỘT MENU TRÁI + PANEL TƯƠNG TÁC PHẢI --- */}
+        <div className="flex-1 flex flex-col lg:flex-row items-start justify-between gap-4 my-2 overflow-hidden">
+          {/* CỘT TRÁI: BIỂN HIỆU ĐÈN NEON & CÁC CHẾ ĐỘ CAMERA 3D */}
+          <div className="pointer-events-auto w-full sm:w-72 flex flex-col gap-2.5">
+            {/* Biển Hiệu Hộp Đèn Quán Nhậu */}
+            <div className="bg-gradient-to-br from-red-950/95 via-slate-900/95 to-amber-950/95 border-2 border-amber-400 rounded-2xl p-3.5 shadow-[0_0_30px_rgba(245,158,11,0.35)]">
+              <div className="flex items-center justify-between text-[10px] font-black text-yellow-300 uppercase tracking-wider">
+                <span>QUÁN TƯ ĐỰC • BỜ KÈ</span>
+                <span className="bg-emerald-500 text-slate-950 px-1.5 py-0.2 rounded">3D LIVE</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black italic tracking-tight text-white drop-shadow-[0_0_12px_rgba(245,158,11,0.8)]">
+                ONLINE DRINKING
+              </h1>
+              <p className="text-[11px] text-amber-200/90 font-semibold">
+                Giả lập Bàn Nhậu Vỉa Hè Vật Lý Ragdoll
+              </p>
+            </div>
+
+            {/* Menu Chuyển Góc Nhìn 3D & Chức Năng */}
+            <nav className="bg-slate-950/85 backdrop-blur-md border border-amber-500/35 rounded-2xl p-2.5 flex flex-col gap-1.5 shadow-2xl">
+              <button
+                onClick={() => {
+                  sfx.playClink();
+                  setCameraMode('LOBBY_CAM');
+                  handleCheersClink3D();
+                }}
+                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-400 via-yellow-400 to-orange-500 text-slate-950 font-black text-sm shadow-[0_4px_0_#9a3412] hover:translate-y-0.5 transition flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Beer className="w-5 h-5 fill-slate-950" />
+                  <span>VÀO NHẬU & DZÔ 100%!</span>
+                </span>
+                <span className="text-[10px] bg-slate-950 text-amber-300 px-1.5 py-0.5 rounded">
+                  3D
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setCameraMode(cameraMode === 'MINIGAME_CAM' ? 'LOBBY_CAM' : 'MINIGAME_CAM');
+                }}
+                className={`w-full py-2 px-3 rounded-xl border text-left flex items-center justify-between transition ${
+                  cameraMode === 'MINIGAME_CAM'
+                    ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                    : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Dices className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <p className="font-extrabold text-xs">MINIGAME XÍ NGẦU NÓI DỐI</p>
+                    <p className="text-[10px] text-slate-400">Zoom Camera xuống mặt bàn Inox</p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-amber-400">🎲</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setCameraMode(cameraMode === 'WARDROBE_CAM' ? 'LOBBY_CAM' : 'WARDROBE_CAM');
+                }}
+                className={`w-full py-2 px-3 rounded-xl border text-left flex items-center justify-between transition ${
+                  cameraMode === 'WARDROBE_CAM'
+                    ? 'bg-purple-500/25 border-purple-400 text-purple-200'
+                    : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Shirt className="w-4 h-4 text-purple-400" />
+                  <div>
+                    <p className="font-extrabold text-xs">TỦ ĐỒ VỈA HÈ (3D SKIN)</p>
+                    <p className="text-[10px] text-slate-400">Zoom cận cảnh Cậu Vàng thay đồ</p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-purple-400">👕</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setActiveModal('HOST');
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-left flex items-center justify-between transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <KeyRound className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <p className="font-extrabold text-xs text-white">THỰC ĐƠN & LUẬT BÀN NHẬU</p>
+                    <p className="text-[10px] text-slate-400">{roomSettings.map}</p>
+                  </div>
+                </div>
+                <span className="text-xs text-emerald-400">📜</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setActiveModal('RECEIPT');
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-left flex items-center justify-between transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Receipt className="w-4 h-4 text-sky-400" />
+                  <div>
+                    <p className="font-extrabold text-xs text-white">HÓA ĐƠN & BÓC PHỐT AI</p>
+                    <p className="text-[10px] text-slate-400">Xem tổng kết thiệt hại bàn nhậu</p>
+                  </div>
+                </div>
+                <span className="text-xs text-sky-400">🧾</span>
+              </button>
+            </nav>
+
+            {/* Quản lý 4 Ghế Nhựa Đỏ trong bàn */}
+            <div className="bg-slate-950/80 backdrop-blur-md border border-amber-500/30 rounded-2xl p-2.5">
+              <p className="text-[10px] font-black uppercase text-amber-300 mb-1.5 flex items-center justify-between">
+                <span>🪑 4 Ghế Nhựa Đỏ Quanh Bàn:</span>
+                <span className="text-slate-400">Click bật/tắt bạn</span>
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {seats.map((s, idx) => (
+                  <button
+                    key={s.seatIndex}
+                    onClick={() => {
+                      if (s.isSelf) {
+                        setCameraMode('WARDROBE_CAM');
+                        return;
+                      }
+                      sfx.playPop();
+                      setSeats((prev) =>
+                        prev.map((item, i) =>
+                          i === idx ? { ...item, occupied: !item.occupied } : item
+                        )
+                      );
+                    }}
+                    className={`p-1.5 rounded-xl border text-left flex items-center gap-1.5 transition ${
+                      s.occupied
+                        ? 'bg-slate-900 border-amber-500/40 text-white'
+                        : 'bg-slate-950/50 border-dashed border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <span className="text-lg">{s.species.emoji}</span>
+                    <div className="truncate">
+                      <p className="text-[10px] font-extrabold truncate">{s.name}</p>
+                      <p className="text-[9px] text-amber-400">
+                        {s.occupied ? 'Đang ngồi' : '+ Gọi vào bàn'}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* CỘT PHẢI: PANEL NGỮ CẢNH (TỦ ĐỒ 3D HOẶC MINIGAME XÍ NGẦU TRÊN BÀN) */}
+          {cameraMode === 'WARDROBE_CAM' && (
+            <div className="pointer-events-auto w-full sm:w-80 bg-slate-950/90 backdrop-blur-md border-2 border-purple-400 rounded-2xl p-4 shadow-2xl animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-purple-500/30 pb-2 mb-3">
+                <h3 className="font-black text-sm text-purple-300 flex items-center gap-1.5">
+                  <Shirt className="w-4 h-4" /> TỦ ĐỒ VỈA HÈ 3D
+                </h3>
+                <button
+                  onClick={() => setCameraMode('LOBBY_CAM')}
+                  className="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-300 hover:text-white"
+                >
+                  Đóng ✕
+                </button>
+              </div>
+
+              <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                1. Chọn Thú Bông 3D:
+              </p>
+              <div className="grid grid-cols-5 gap-1.5 mb-3">
+                {SPECIES_LIST.map((sp) => (
+                  <button
+                    key={sp.id}
+                    onClick={() => {
+                      sfx.playPop();
+                      setSelectedSpecies(sp);
+                      setSeats((prev) =>
+                        prev.map((s, i) => (i === 0 ? { ...s, species: sp } : s))
+                      );
+                    }}
+                    className={`p-2 rounded-xl border flex flex-col items-center transition ${
+                      selectedSpecies.id === sp.id
+                        ? 'bg-amber-500/30 border-amber-400 scale-105'
+                        : 'bg-slate-900 border-slate-700'
+                    }`}
+                  >
+                    <span className="text-xl">{sp.emoji}</span>
+                    <span className="text-[9px] font-bold mt-0.5 truncate w-full text-center">
+                      {sp.name.split(' ')[0]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                2. Phụ Kiện Đầu & Giấy Dán Trán:
+              </p>
+              <div className="grid grid-cols-2 gap-1.5 mb-3">
+                {HAT_OPTIONS.map((hat) => (
+                  <button
+                    key={hat.id}
+                    onClick={() => {
+                      sfx.playPop();
+                      setSelectedHat(hat.id);
+                    }}
+                    className={`p-2 rounded-xl border text-left text-[11px] font-bold flex items-center gap-1.5 transition ${
+                      selectedHat === hat.id
+                        ? 'bg-purple-500/30 border-purple-400 text-white'
+                        : 'bg-slate-900 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <span>{hat.icon}</span>
+                    <span className="truncate">{hat.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                3. Màu Áo Ba Lỗ / Sơ Mi:
+              </p>
+              <div className="flex gap-2 mb-3">
+                {['#ffffff', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#a855f7'].map((hex) => (
+                  <button
+                    key={hex}
+                    onClick={() => {
+                      sfx.playPop();
+                      setCustomShirtHex(hex);
+                    }}
+                    style={{ backgroundColor: hex }}
+                    className={`w-7 h-7 rounded-full border-2 ${
+                      customShirtHex === hex ? 'border-yellow-300 scale-110' : 'border-slate-700'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={() => setCameraMode('LOBBY_CAM')}
+                className="w-full py-2 rounded-xl bg-purple-500 hover:bg-purple-400 text-slate-950 font-black text-xs shadow"
+              >
+                LƯU SKIN & QUAY LẠI BÀN NHẬU
+              </button>
+            </div>
+          )}
+
+          {cameraMode === 'MINIGAME_CAM' && (
+            <div className="pointer-events-auto w-full sm:w-80 bg-slate-950/90 backdrop-blur-md border-2 border-amber-400 rounded-2xl p-4 shadow-2xl animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-amber-500/30 pb-2 mb-3">
+                <h3 className="font-black text-sm text-amber-300 flex items-center gap-1.5">
+                  <Dices className="w-4 h-4" /> LẮC XÍ NGẦU NÓI DỐI
+                </h3>
+                <button
+                  onClick={() => setCameraMode('LOBBY_CAM')}
+                  className="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-300 hover:text-white"
+                >
+                  Đóng ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300 mb-2">
+                Cốc xí ngầu của bạn trên mặt bàn Inox:
+              </p>
+              <div className="flex justify-center gap-2 bg-slate-900 p-3 rounded-xl border border-amber-500/30 mb-3">
+                {diceValues.map((val, i) => (
+                  <div
+                    key={i}
+                    className={`w-10 h-10 rounded-xl bg-white text-slate-950 font-black text-lg flex items-center justify-center shadow border-2 border-amber-400 ${
+                      isRollingDice ? 'animate-spin' : ''
+                    }`}
+                  >
+                    {val}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleRollLiarDice}
+                  className="py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs"
+                >
+                  🎲 LẮC XÍ NGẦU
+                </button>
+                <button
+                  onClick={() => {
+                    handleSendChat('Tao hô có năm con 6 trên bàn! Đứa nào dám mở bát?!');
+                    triggerToast('🗣️ Bạn vừa hô: "Năm con 6!" — Chờ đối thủ bắt bài!');
+                  }}
+                  className="py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs"
+                >
+                  🗣️ HÔ HÙ DỌA!
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* --- BOTTOM DOCK: THANH KỸ NĂNG VẬT LÝ SANDBOX 3D & BONG BÓNG CHAT --- */}
+        <footer className="pointer-events-auto flex flex-col gap-2 bg-slate-950/85 backdrop-blur-md border border-amber-500/35 rounded-2xl p-3 shadow-2xl">
+          {/* Hàng 1: Các nút Tương Tác Vật Lý 3D Trực Tiếp */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase text-amber-400 mr-1">
+                🎮 Tương tác 3D:
+              </span>
+              <button
+                onClick={handleCheersClink3D}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow hover:scale-105 transition"
+              >
+                <PartyPopper className="w-3.5 h-3.5" />
+                <span>Hô "1, 2, 3 DZÔ!"</span>
+              </button>
+
+              <button
+                onClick={launch3DPeanut}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/40 text-amber-200 font-bold text-xs transition"
+              >
+                🥜 Búng Đậu Phộng 3D
+              </button>
+
+              <button
+                onClick={() => launch3DSlipper(null)}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-yellow-400 hover:text-slate-950 border border-yellow-500/40 text-yellow-200 font-bold text-xs transition"
+              >
+                🩴 Phi Dép Tổ Ong
+              </button>
+
+              <button
+                onClick={handleStackCanAndPrank}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 border border-emerald-500/40 text-emerald-200 font-bold text-xs transition"
+              >
+                🥫 Chất Vỏ Lon + Dán Giấy
+              </button>
+
+              <button
+                onClick={handleToggleTableFlip}
+                className={`px-3 py-1.5 rounded-xl font-black text-xs border transition ${
+                  isTableFlipped
+                    ? 'bg-emerald-500 text-slate-950 border-white animate-pulse'
+                    : 'bg-rose-600/90 hover:bg-rose-500 text-white border-rose-300'
+                }`}
+              >
+                {isTableFlipped ? '🔄 Dựng Lại Bàn Inox' : '💥 LẬT BÀN INOX!'}
+              </button>
+            </div>
+
+            {/* Nhóm nút Sự kiện dành cho màn hình nhỏ */}
+            <div className="flex xl:hidden items-center gap-1">
+              <button
+                onClick={() => setActiveModal('WIFE_CALL')}
+                className="px-2 py-1 rounded bg-rose-500/20 text-rose-300 text-[10px] font-bold border border-rose-500/40"
+              >
+                📱 Nóc Nhà
+              </button>
+              <button
+                onClick={() => setActiveModal('KARAOKE')}
+                className="px-2 py-1 rounded bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/40"
+              >
+                🔊 Loa Kẹo Kéo
+              </button>
+              <button
+                onClick={() => {
+                  setPoliceClicks(0);
+                  setActiveModal('POLICE');
+                }}
+                className="px-2 py-1 rounded bg-sky-500/20 text-sky-300 text-[10px] font-bold border border-sky-500/40"
+              >
+                🚨 Phường Dẹp
+              </button>
+            </div>
+          </div>
+
+          {/* Hàng 2: Ô Gõ Chat Hiện Bong Bóng 3D Trên Đầu & Khẩu Hiệu Nhanh */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendChat();
+              }}
+              className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-lg"
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder={
+                  alcoholLevel > 65
+                    ? 'Đang say >65%: Gõ chữ bất kỳ xem bị "Rượu vào lời ra" đổi câu...'
+                    : 'Gõ chat hiện bong bóng 3D trên đầu nhân vật...'
+                }
+                className="w-full bg-slate-900 border border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-400 outline-none"
+              />
+              <button
+                type="submit"
+                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1 shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Nói</span>
+              </button>
+            </form>
+
+            <div className="flex flex-wrap items-center gap-1 justify-center">
+              {[
+                '1, 2, 3 Dzô 100% nhé!',
+                'Tao chưa say nhé!',
+                'Thôi tao xin về trước...',
+                'Ai gọi chủ quán tính tiền đi!'
+              ].map((phrase, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSendChat(phrase)}
+                  className="text-[10px] font-bold bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-amber-200 border border-amber-500/30 px-2 py-1 rounded-lg transition"
+                >
+                  "{phrase}"
+                </button>
+              ))}
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      {/* =====================================================================
+          4. CÁC MODAL SỰ KIỆN ĐƯỜNG PHỐ & HÓA ĐƠN BÓC PHỐT
+      ===================================================================== */}
+
+      {/* MODAL SỰ KIỆN 1: ĐIỆN THOẠI "NÓC NHÀ" GỌI KIỂM TRA */}
+      {activeModal === 'WIFE_CALL' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border-4 border-rose-500 rounded-3xl p-6 text-center shadow-[0_0_50px_rgba(225,29,72,0.8)] animate-bounce">
+            <div className="w-16 h-16 mx-auto rounded-full bg-rose-600 flex items-center justify-center text-3xl mb-2 shadow-lg">
+              🐅
+            </div>
+            <p className="text-xs font-black uppercase tracking-widest text-rose-400">
+              CUỘC GỌI ĐẾN • GIỮ IM LẶNG TUYỆT ĐỐI ({wifeCallTimer}s)
+            </p>
+            <h2 className="text-2xl font-black text-white mt-1">"NÓC NHÀ 🐅" ĐANG TRA HỎI!</h2>
+            <p className="text-xs text-amber-200 italic mt-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              "Anh đang ở đâu đấy?! Lại ngồi nhậu vỉa hè với lũ bạn hư hỏng phải không?!"
+            </p>
+
+            {/* Thanh đo tiếng ồn phòng */}
+            <div className="mt-4 text-left">
+              <div className="flex justify-between text-xs font-black mb-1">
+                <span className="text-slate-300">Độ ồn bàn nhậu (Lũ bạn đang phá đám):</span>
+                <span className="text-rose-400">{wifeCallNoise} dB / 90 dB</span>
+              </div>
+              <div className="w-full h-4 bg-slate-950 rounded-full overflow-hidden border border-rose-500/50">
+                <div
+                  style={{ width: `${wifeCallNoise}%` }}
+                  className="h-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-rose-600 transition-all duration-200"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setWifeCallNoise((n) => Math.max(5, n - 25));
+                }}
+                className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg"
+              >
+                🤫 BỊT MIỆNG LŨ BẠN (-25 dB)
+              </button>
+              <button
+                onClick={() => {
+                  setActiveModal(null);
+                  launch3DSlipper(0);
+                  triggerToast('🩴 Lộ tiếng cụng ly! Nóc nhà vừa phi dép tổ ong xuyên màn hình!');
+                }}
+                className="py-3 px-4 rounded-xl bg-rose-700 text-white font-black text-xs"
+              >
+                Hét "1,2,3 Dzô!"
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SỰ KIỆN 2: ANH CHÀNG KÉO LOA KẸO KÉO TỚI BÀN */}
+      {activeModal === 'KARAOKE' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-gradient-to-br from-purple-950 via-slate-900 to-rose-950 border-2 border-purple-400 rounded-3xl p-6 text-center shadow-2xl">
+            <div className="text-5xl mb-2 animate-bounce">🔊🎤</div>
+            <span className="text-[10px] font-black uppercase bg-purple-400 text-slate-950 px-2.5 py-0.5 rounded-full">
+              NPC RANDOM EVENT • ÁT TIẾNG VOICE CHAT
+            </span>
+            <h3 className="text-2xl font-black text-white mt-2">
+              ANH LOA KẸO KÉO ĐỨNG SÁT BÀN!
+            </h3>
+            <p className="text-xs text-purple-200 mt-1">
+              Nhạc Vinahouse & Bolero đang bật max volume làm rung cả ly bia trên bàn Inox!
+            </p>
+
+            <div className="mt-5 space-y-2 text-xs font-black">
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setBottleCaps((c) => Math.max(0, c - 20));
+                  setActiveModal(null);
+                  triggerToast('🍬 Đã mua ủng hộ 2 phong kẹo cao su! Cả bàn nhận Buff Hưng Phấn!');
+                }}
+                className="w-full py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 shadow"
+              >
+                🍬 Mua Kẹo Cao Su Ủng Hộ (-20 Nắp Bia)
+              </button>
+              <button
+                onClick={() => {
+                  sfx.playClink();
+                  setActiveModal(null);
+                  handleSendChat('Đưa cái Mic đây cho tao hát bài Đắp Mộ Cuộc Tình coi!! 🎤');
+                  triggerToast('🎤 Bạn vừa giật lấy Mic vàng hát vang khắp quán Tư Đực!');
+                }}
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow"
+              >
+                🎤 Giật Mic Tự Hát Karaoke Giữa Quán!
+              </button>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="w-full py-2 rounded-xl bg-slate-800 text-slate-300"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SỰ KIỆN 3: ĐỘI KIỂM TRA ĐÔ THỊ / PHƯỜNG ĐI DẸP VỈA HÈ */}
+      {activeModal === 'POLICE' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border-4 border-sky-400 rounded-3xl p-6 text-center shadow-[0_0_45px_rgba(56,189,248,0.8)]">
+            <Siren className="w-12 h-12 mx-auto text-rose-500 animate-spin mb-2" />
+            <h3 className="text-2xl font-black text-white">
+              🚨 PHƯỜNG ĐI DẸP VỈA HÈ! BÊ BÀN CHẠY!
+            </h3>
+            <p className="text-xs text-sky-200 mt-1">
+              Bấm liên tục để cả 4 anh em hợp sức bê nguyên cái bàn Inox lùi vào sau vạch sơn trắng!
+            </p>
+
+            <div className="w-full h-5 bg-slate-950 rounded-full overflow-hidden border border-sky-400 my-4">
+              <div
+                style={{ width: `${(policeClicks / 8) * 100}%` }}
+                className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                sfx.playPop();
+                const next = policeClicks + 1;
+                setPoliceClicks(next);
+                if (next >= 8) {
+                  setActiveModal(null);
+                  triggerToast(
+                    '🏃‍♂️💨 Đã bê nguyên bàn Inox và 4 ghế nhựa lùi vào trong vạch an toàn! Không rớt miếng mồi nào!'
+                  );
+                }
+              }}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black text-sm shadow-lg active:scale-95 transition"
+            >
+              💪 BẤM BÊ BÀN CHẠY ({policeClicks}/8)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: TỜ HÓA ĐƠN TÍNH TIỀN & CHỊ GOOGLE BÓC PHỐT CUỐI TRẬN */}
+      {activeModal === 'RECEIPT' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-[#fdf8e7] text-slate-900 border-2 border-stone-400 rounded-2xl p-6 shadow-2xl -rotate-1">
+            <button
+              onClick={() => setActiveModal(null)}
+              className="absolute top-3 right-3 w-7 h-7 rounded-full bg-stone-800 text-white flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="text-center border-b-2 border-dashed border-stone-400 pb-3 mb-3">
+              <p className="text-[10px] font-black uppercase text-red-700">
+                QUÁN NHẬU TƯ ĐỰC - BỜ KÈ • HÓA ĐƠN TẠM TÍNH
+              </p>
+              <h3 className="text-xl font-black uppercase">BẢNG PHONG THẦN BÀN NHẬU</h3>
+            </div>
+
+            <div className="space-y-1.5 text-xs font-mono border-b-2 border-dashed border-stone-400 pb-3 mb-3">
+              <div className="flex justify-between">
+                <span>• 02 Tháp Bia Tươi + 18 Lon:</span>
+                <span className="font-bold">540.000đ</span>
+              </div>
+              <div className="flex justify-between">
+                <span>• 01 Đĩa Chân Gà + Đậu Phộng:</span>
+                <span className="font-bold">180.000đ</span>
+              </div>
+              <div className="flex justify-between text-red-700 font-bold">
+                <span>• Đền bù lật bàn Inox & gãy ghế nhựa:</span>
+                <span>250.000đ</span>
+              </div>
+              <div className="flex justify-between text-sm font-black pt-1 border-t border-stone-300">
+                <span>TỔNG THIỆT HẠI:</span>
+                <span className="text-red-700">970.000đ</span>
+              </div>
+            </div>
+
+            <div className="bg-amber-100 border border-amber-400 rounded-xl p-3 text-xs space-y-1.5 mb-4">
+              <p className="font-black text-red-800 uppercase">
+                🎙️ MC Bàn Nhậu Bóc Phốt:
+              </p>
+              <p>
+                🏆 <b>Chúa Tể Gắp Mồi:</b> Hùng Đại Ca (Uống 1 ly rưỡi nhưng gắp sạch 14 miếng mồi).
+              </p>
+              <p>
+                🎨 <b>Nạn Nhân Của Đêm:</b> Đứa bị dán giấy <i>"Bao Hết"</i> và chất{' '}
+                {seats[1].cansOnHead} vỏ lon lên đầu!
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                setActiveModal(null);
+                handleToggleTableFlip();
+              }}
+              className="w-full py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-white font-black text-xs shadow"
+            >
+              💥 LAO VÀO HỖN CHIẾN GIÀNH NÉ TRẢ BILL!
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: THỰC ĐƠN CHỌN LUẬT NHẬU (HOST ROOM) */}
+      {activeModal === 'HOST' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-amber-50 text-slate-900 border-4 border-red-700 rounded-3xl p-6 shadow-2xl">
+            <button
+              onClick={() => setActiveModal(null)}
+              className="absolute top-4 right-4 w-7 h-7 rounded-full bg-red-700 text-white flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <h3 className="text-xl font-black text-red-800 uppercase mb-3">
+              📜 THỰC ĐƠN LUẬT BÀN NHẬU
+            </h3>
+            <div className="space-y-2.5 text-xs font-bold">
+              {[
+                { key: 'micCheers', label: 'Bắt buộc mở Mic hô to "1, 2, 3 Dzô!" mới được uống' },
+                { key: 'wifeCallEvent', label: 'Sự kiện "Nóc Nhà Gọi Điện Kiểm Tra" giữa trận' },
+                { key: 'policePatrol', label: 'Sự kiện "Phường Đi Dẹp Vỉa Hè" (Hợp sức bê bàn)' },
+                { key: 'billFight', label: 'Hỗn chiến ném ghế nhựa giành né Hóa Đơn cuối trận' }
+              ].map((r) => (
+                <label
+                  key={r.key}
+                  className="flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-100 border border-amber-300 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={roomSettings[r.key]}
+                    onChange={(e) =>
+                      setRoomSettings({ ...roomSettings, [r.key]: e.target.checked })
+                    }
+                    className="w-4 h-4 accent-red-700"
+                  />
+                  <span>{r.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <button
+              onClick={() => {
+                setActiveModal(null);
+                triggerToast('✅ Đã lưu Thực Đơn Luật Nhậu!');
+              }}
+              className="mt-4 w-full py-2.5 rounded-xl bg-red-700 text-white font-black text-xs"
+            >
+              XÁC NHẬN LÊN MỒI!
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          5. CỔNG QUÁN NHẬU TƯ ĐỰC: LOGIN / SIGN UP / NHẬU CHUI (AUTH OVERLAY)
+      ===================================================================== */}
+      {!isAuthenticated && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex flex-col justify-between overflow-y-auto p-3 sm:p-5">
+          {/* Dây đèn LED vàng & Bọt bia bay lơ lửng ở Cổng Quán */}
+          <div className="pointer-events-none fixed inset-x-0 top-0 h-10 flex justify-around items-start overflow-hidden z-0">
+            {Array.from({ length: 14 }).map((_, i) => (
+              <div
+                key={i}
+                className={`w-3.5 h-3.5 rounded-full -mt-1 shadow-[0_0_18px_#facc15] ${
+                  i % 2 === 0 ? 'bg-yellow-300 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+            ))}
+          </div>
+
+          {/* Thanh Top Bar nhỏ của Cổng Quán */}
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 max-w-6xl w-full mx-auto pt-1">
+            <div className="flex items-center gap-2 bg-slate-900/90 border border-amber-500/40 px-3 py-1.5 rounded-full">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+              <span className="text-[11px] font-black text-amber-200 tracking-wide">
+                CỔNG QUÁN NHẬU TƯ ĐỰC BỜ KÈ • SERVER ĐÔNG NGHỊT (1,428 BÀN ĐANG DZÔ)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  sfx.playPop();
+                  setShowMongoDrawer(!showMongoDrawer);
+                }}
+                className={`px-3 py-1.5 rounded-full text-xs font-black border flex items-center gap-1.5 transition ${
+                  showMongoDrawer
+                    ? 'bg-emerald-500 text-slate-950 border-white shadow-[0_0_20px_rgba(16,185,129,0.7)]'
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>🔍 Xem MongoDB Payload (`players`)</span>
+              </button>
+
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="p-2 rounded-full bg-slate-900/90 border border-amber-500/40 text-amber-300 hover:bg-slate-800"
+                title="Bật/Tắt Âm Thanh Quán Nhậu"
+              >
+                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
+
+              <button
+                onClick={() => {
+                  sfx.playClink();
+                  setIsAuthenticated(true);
+                }}
+                className="px-3 py-1.5 rounded-full bg-slate-800/90 hover:bg-amber-400 hover:text-slate-950 text-slate-300 text-xs font-bold border border-slate-700 transition"
+              >
+                Xem Sảnh 3D Ngay ➔
+              </button>
+            </div>
+          </div>
+
+          {/* KHỐI TRUNG TÂM: BẢNG HIỆU NEON + FORM THỰC ĐƠN ÉP PLASTIC + HỘ CHIẾU TỬU LƯỢNG */}
+          <div className="relative z-10 my-auto max-w-6xl w-full mx-auto py-3">
+            {/* Bảng Hiệu Hộp Đèn Neon Nhấp Nháy */}
+            <div className="text-center mb-4">
+              <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-red-950/90 border-2 border-amber-400 text-amber-300 text-[11px] font-black uppercase tracking-widest shadow-[0_0_25px_rgba(245,158,11,0.5)]">
+                <span>🍻 QUÁN NHẬU ONLINE 3D • VẬT LÝ RAGDOLL LẦY LỘI</span>
+              </div>
+              <h1 className="mt-1.5 text-3xl sm:text-5xl font-black italic tracking-tight text-white drop-shadow-[0_0_20px_rgba(245,158,11,0.95)]">
+                ONLINE DRINKING{' '}
+                <span className="text-amber-400 underline decoration-wavy decoration-rose-500">
+                  KHÔNG SAY KHÔNG VỀ!
+                </span>
+              </h1>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+              {/* ===============================================================
+                  CỘT TRÁI (7 CỘT): BẢNG THỰC ĐƠN ĐĂNG NHẬP / ĐĂNG KÝ / NHẬU CHUI
+              =============================================================== */}
+              <div className="lg:col-span-7 bg-gradient-to-b from-slate-900/95 via-slate-950/95 to-slate-900/95 border-2 border-amber-400/80 rounded-3xl p-4 sm:p-6 shadow-[0_0_50px_rgba(0,0,0,0.85)] flex flex-col justify-between">
+                {/* 3 TAB CHẾ ĐỘ VÀO BÀN (THIẾT KẾ NHƯ THẺ BÀN NHẬU) */}
+                <div>
+                  <div className="grid grid-cols-3 gap-2 bg-slate-950 p-1.5 rounded-2xl border border-amber-500/30 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sfx.playPop();
+                        setAuthTab('LOGIN');
+                        setAuthErrorMsg('');
+                      }}
+                      className={`py-2.5 px-2 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition ${
+                        authTab === 'LOGIN'
+                          ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 shadow-[0_3px_0_#9a3412]'
+                          : 'text-slate-300 hover:text-amber-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <span>🎫</span>
+                      <span>Vé Vào Bàn (Login)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sfx.playPop();
+                        setAuthTab('SIGNUP');
+                        setAuthErrorMsg('');
+                      }}
+                      className={`py-2.5 px-2 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition ${
+                        authTab === 'SIGNUP'
+                          ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 shadow-[0_3px_0_#9a3412]'
+                          : 'text-slate-300 hover:text-amber-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <span>🪪</span>
+                      <span>Làm Hộ Chiếu (Sign Up)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sfx.playPop();
+                        setAuthTab('GUEST');
+                        setAuthErrorMsg('');
+                      }}
+                      className={`py-2.5 px-2 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition ${
+                        authTab === 'GUEST'
+                          ? 'bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 shadow-[0_3px_0_#065f46]'
+                          : 'text-slate-300 hover:text-emerald-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <span>⚡</span>
+                      <span>Nhậu Chui (3 Giây)</span>
+                    </button>
+                  </div>
+
+                  {/* --- NỘI DUNG TAB 1: ĐĂNG NHẬP ("VÉ VÀO BÀN") --- */}
+                  {authTab === 'LOGIN' && (
+                    <form onSubmit={handleCompleteAuthSubmit} className="space-y-3.5 animate-fadeIn">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-amber-300 mb-1">
+                          🍺 Biệt Danh Bàn Nhậu / Email:
+                        </label>
+                        <input
+                          type="text"
+                          value={loginIdentifier}
+                          onChange={(e) => {
+                            sfx.playPop();
+                            setLoginIdentifier(e.target.value);
+                          }}
+                          placeholder="VD: cauvang_doluc@nhau.vn"
+                          className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white placeholder-slate-500 outline-none transition"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-black uppercase text-amber-300">
+                            🔑 Mật Khẩu / Ám Hiệu Vào Quán:
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sfx.playPop();
+                              setForgotPassSent(false);
+                              setForgotPassModal(true);
+                            }}
+                            className="text-[11px] font-bold text-rose-400 hover:text-rose-300 underline"
+                          >
+                            Quên mật khẩu vì hôm qua say quá?
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type={showPassword ? 'text' : 'password'}
+                            value={password}
+                            onFocus={() => setIsPasswordFocused(true)}
+                            onBlur={() => setIsPasswordFocused(false)}
+                            onChange={(e) => {
+                              sfx.playPop();
+                              setPassword(e.target.value);
+                            }}
+                            placeholder="Nhập ám hiệu..."
+                            className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl pl-3.5 pr-28 py-2.5 text-sm font-bold text-white outline-none transition"
+                          />
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              sfx.playPop();
+                              setIsPasswordFocused(true);
+                              setShowPassword(!showPassword);
+                            }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-amber-300 text-[11px] font-black flex items-center gap-1 transition"
+                          >
+                            {showPassword ? (
+                              <>
+                                <EyeOff className="w-3.5 h-3.5" /> <span>Che Mắt</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="w-3.5 h-3.5" /> <span>Hé Nhìn</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Đăng nhập nhanh qua MXH & Ví Web3 */}
+                      <div className="pt-1">
+                        <p className="text-[10px] font-black uppercase text-slate-400 mb-2 text-center">
+                          — HOẶC VÀO BÀN NHANH BẰNG THẺ QUEN —
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {[
+                            { label: 'Google', icon: '🌐', color: 'hover:border-red-400' },
+                            { label: 'Discord', icon: '🎧', color: 'hover:border-indigo-400' },
+                            { label: 'Apple ID', icon: '🍎', color: 'hover:border-slate-300' },
+                            { label: 'Ví Web3 (Bill)', icon: '🦊', color: 'hover:border-amber-400' }
+                          ].map((soc) => (
+                            <button
+                              key={soc.label}
+                              type="button"
+                              onClick={() => {
+                                sfx.playClink();
+                                setLoginIdentifier(`${soc.label.toLowerCase()}_chienthan@nhau.vn`);
+                                setCaptchaStatus('SUCCESS');
+                                setBeerPourLevel(84);
+                              }}
+                              className={`py-2 px-2 rounded-xl bg-slate-950 border border-slate-700 ${soc.color} text-xs font-extrabold text-slate-200 flex items-center justify-center gap-1.5 transition hover:bg-slate-900`}
+                            >
+                              <span>{soc.icon}</span>
+                              <span className="truncate">{soc.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* --- NỘI DUNG TAB 2: ĐĂNG KÝ ("LÀM HỘ CHIẾU TỬU LƯỢNG") --- */}
+                  {authTab === 'SIGNUP' && (
+                    <div className="space-y-3 animate-fadeIn">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-black uppercase text-amber-300 mb-1">
+                            🏷️ Biệt Danh Trên Bàn Nhậu:
+                          </label>
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              value={signupNickname}
+                              onChange={(e) => setSignupNickname(e.target.value)}
+                              maxLength={22}
+                              className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sfx.playPop();
+                                const pick =
+                                  FUNNY_RANDOM_NAMES[
+                                    Math.floor(Math.random() * FUNNY_RANDOM_NAMES.length)
+                                  ];
+                                setSignupNickname(pick);
+                              }}
+                              className="px-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-300 text-xs font-black"
+                              title="Random Biệt Danh Lầy Lội"
+                            >
+                              🎲
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-black uppercase text-amber-300 mb-1">
+                            📧 Email Nhận Hóa Đơn Đền Bù:
+                          </label>
+                          <input
+                            type="email"
+                            value={signupEmail}
+                            onChange={(e) => setSignupEmail(e.target.value)}
+                            className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Chọn Nhân Vật Thú Bông 3D Đại Diện */}
+                      <div>
+                        <label className="block text-[11px] font-black uppercase text-amber-300 mb-1">
+                          🐾 Chọn Thú Bông 3D Ngồi Ghế Nhựa Đỏ:
+                        </label>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {SPECIES_LIST.map((sp) => (
+                            <button
+                              key={sp.id}
+                              type="button"
+                              onClick={() => {
+                                sfx.playPop();
+                                setSelectedSpecies(sp);
+                              }}
+                              className={`p-2 rounded-xl border text-center transition ${
+                                selectedSpecies.id === sp.id
+                                  ? 'bg-amber-500/30 border-amber-400 scale-105 shadow'
+                                  : 'bg-slate-950 border-slate-800 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="text-xl">{sp.emoji}</div>
+                              <div className="text-[10px] font-extrabold text-white truncate">
+                                {sp.name}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Chọn Hệ Tư Tưởng Khi Say (Drunk Archetype) */}
+                      <div>
+                        <label className="block text-[11px] font-black uppercase text-amber-300 mb-1">
+                          🌀 Hệ Tư Tưởng Khi Say (&gt;80% Cồn Tự Động Bộc Phát):
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {DRUNK_ARCHETYPES.map((arch) => (
+                            <button
+                              key={arch.id}
+                              type="button"
+                              onClick={() => {
+                                sfx.playPop();
+                                setSignupArchetype(arch);
+                              }}
+                              className={`p-2 rounded-xl border text-left transition ${
+                                signupArchetype.id === arch.id
+                                  ? 'bg-purple-500/30 border-purple-400 text-white'
+                                  : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-900'
+                              }`}
+                            >
+                              <div className="text-xs font-black flex items-center gap-1">
+                                <span>{arch.icon}</span>
+                                <span className="truncate">{arch.name}</span>
+                              </div>
+                              <p className="text-[9px] text-slate-400 line-clamp-1 mt-0.5">
+                                {arch.quote}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Thanh Khai Báo Tửu Lượng */}
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/30">
+                        <div className="flex justify-between text-xs font-black">
+                          <span className="text-amber-300">🍻 Tửu Lượng Tự Khai Báo:</span>
+                          <span className="text-yellow-300">
+                            {signupTolerance < 30
+                              ? `${signupTolerance}% (1 Lon Là Gục 😴)`
+                              : signupTolerance < 75
+                              ? `${signupTolerance}% (Đô Vỉa Hè 🍺)`
+                              : `${signupTolerance}% (Bất Tử Cồn 🔥)`}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          value={signupTolerance}
+                          onChange={(e) => setSignupTolerance(Number(e.target.value))}
+                          className="w-full accent-amber-400 h-2 mt-1 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* --- NỘI DUNG TAB 3: NHẬU CHUI / KHÁCH VÃNG LAI (3 GIÂY VÀO BÀN) --- */}
+                  {authTab === 'GUEST' && (
+                    <div className="space-y-3.5 animate-fadeIn">
+                      <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-3 text-xs text-emerald-200 flex items-center gap-2.5">
+                        <span className="text-2xl">🏃‍♂️💨</span>
+                        <div>
+                          <p className="font-black text-emerald-300 uppercase">
+                            Chế Độ Nhậu Chui Cấp Tốc (Không Cần Mật Khẩu)
+                          </p>
+                          <p className="text-[11px] text-emerald-100/80">
+                            Dành cho anh em vừa bấm link rủ nhậu trên Messenger/Discord muốn nhảy tọt
+                            lên ghế nhựa đỏ trong 3 giây!
+                          </p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-black uppercase text-emerald-300 mb-1">
+                          🎲 Biệt Danh Tạm Thời Của Bạn:
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={guestNickname}
+                            onChange={(e) => setGuestNickname(e.target.value)}
+                            className="w-full bg-slate-950 border-2 border-emerald-500/50 rounded-xl px-3.5 py-2.5 text-sm font-black text-white outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sfx.playPop();
+                              const nextName =
+                                FUNNY_RANDOM_NAMES[
+                                  Math.floor(Math.random() * FUNNY_RANDOM_NAMES.length)
+                                ];
+                              setGuestNickname(nextName);
+                            }}
+                            className="px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shrink-0 flex items-center gap-1 shadow"
+                          >
+                            <Dices className="w-4 h-4" /> Random Tên Bựa
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Tờ Hóa Đơn Nhập Mã Bàn PIN 6 Số */}
+                      <div className="bg-[#fdf8e7] text-slate-900 p-3.5 rounded-2xl border-2 border-dashed border-stone-400 shadow-inner">
+                        <div className="flex items-center justify-between text-[10px] font-black uppercase text-red-700 mb-1">
+                          <span>🧾 PHIẾU VÀO BÀN NHẬU (MÃ PIN 6 SỐ)</span>
+                          <span>BÀN SỐ #04</span>
+                        </div>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={guestRoomPin}
+                          onChange={(e) => setGuestRoomPin(e.target.value.replace(/\D/g, ''))}
+                          placeholder="686868"
+                          className="w-full bg-amber-100/80 border-2 border-stone-400 rounded-xl py-2 text-center font-mono text-2xl font-black tracking-[0.45em] text-red-800 outline-none"
+                        />
+                        <p className="text-[10px] text-stone-600 text-center mt-1 font-semibold">
+                          Để trống nếu muốn ghép vào bàn nhậu ngẫu nhiên đang thiếu chân!
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* =============================================================
+                    MINI-GAME CAPTCHA: "RÓT BIA CHUẨN ĐÉT (70% - 95%)" & CAM KẾT 18+
+                ============================================================= */}
+                <div className="mt-4 pt-3 border-t border-slate-800 space-y-3">
+                  {/* Checkbox Cam kết 18+ & Không gọi NY Cũ */}
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none bg-slate-950/90 px-3 py-2 rounded-xl border border-amber-500/30 hover:border-amber-400 transition">
+                    <input
+                      type="checkbox"
+                      checked={ageVerified}
+                      onChange={(e) => {
+                        sfx.playPop();
+                        setAgeVerified(e.target.checked);
+                      }}
+                      className="w-4 h-4 accent-amber-400 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-amber-100">
+                      Tôi đã đủ <b className="text-amber-400">18 tuổi</b> và cam kết khi say trên
+                      85% <b className="text-rose-400">không gọi điện cho Người Yêu Cũ</b>!
+                    </span>
+                  </label>
+
+                  {/* Hộp Captcha Rót Bia Vật Lý */}
+                  <div className="bg-slate-950 border-2 border-amber-500/40 rounded-2xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      {/* Ly Bia Ảo Đang Được Rót */}
+                      <div className="relative w-14 h-20 rounded-b-xl rounded-t-sm border-2 border-white/80 bg-slate-900 overflow-hidden shrink-0 shadow-inner">
+                        {/* Vùng Vạch Vàng Chuẩn (70% - 95%) */}
+                        <div
+                          style={{ bottom: '70%', height: '25%' }}
+                          className="absolute inset-x-0 bg-emerald-400/25 border-y border-dashed border-emerald-300 z-10 flex items-center justify-center"
+                        >
+                          <span className="text-[8px] font-black text-emerald-200 uppercase">
+                            CHUẨN
+                          </span>
+                        </div>
+
+                        {/* Cột Nước Bia Vàng Óng */}
+                        <div
+                          style={{ height: `${beerPourLevel}%` }}
+                          className={`absolute bottom-0 inset-x-0 transition-all duration-75 ${
+                            captchaStatus === 'OVERFLOW'
+                              ? 'bg-rose-500'
+                              : captchaStatus === 'SUCCESS'
+                              ? 'bg-gradient-to-t from-amber-500 via-yellow-400 to-white'
+                              : 'bg-gradient-to-t from-amber-600 to-yellow-300'
+                          }`}
+                        >
+                          {/* Lớp bọt trắng trên mặt bia */}
+                          {beerPourLevel > 5 && (
+                            <div className="w-full h-2.5 bg-white rounded-t-sm animate-pulse" />
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-black uppercase text-amber-300">
+                            🍺 CAPTCHA RÓT BIA TỈNH TÁO:
+                          </span>
+                          <span
+                            className={`font-mono font-black px-1.5 py-0.2 rounded text-[11px] ${
+                              captchaStatus === 'SUCCESS'
+                                ? 'bg-emerald-500 text-slate-950'
+                                : captchaStatus === 'OVERFLOW'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-slate-800 text-amber-300'
+                            }`}
+                          >
+                            {Math.round(beerPourLevel)}%
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          {captchaStatus === 'SUCCESS'
+                            ? '✅ Bọt bia chuẩn đét (70-95%)! Đã mở khóa cổng bàn nhậu!'
+                            : captchaStatus === 'OVERFLOW'
+                            ? '💦 Tràn bọt lênh láng rồi! Bấm "Hớt Bọt" để rót lại!'
+                            : 'Nhấn giữ nút bên phải để rót bia dừng trong vạch CHUẨN (70% - 95%)'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Nút Giữ Để Rót Bia / Hớt Bọt */}
+                    <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                      {captchaStatus === 'OVERFLOW' || beerPourLevel > 0 ? (
+                        <button
+                          type="button"
+                          onClick={handleResetPourCaptcha}
+                          className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-600"
+                          title="Đổ bớt bọt rót lại"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onMouseDown={handleStartPourCaptcha}
+                        onMouseUp={handleStopPourCaptcha}
+                        onMouseLeave={handleStopPourCaptcha}
+                        onTouchStart={(e) => {
+                          e.preventDefault();
+                          handleStartPourCaptcha();
+                        }}
+                        onTouchEnd={(e) => {
+                          e.preventDefault();
+                          handleStopPourCaptcha();
+                        }}
+                        className={`px-4 py-2.5 rounded-xl font-black text-xs select-none transition shadow-lg ${
+                          captchaStatus === 'SUCCESS'
+                            ? 'bg-emerald-400 text-slate-950'
+                            : isPouringCaptcha
+                            ? 'bg-amber-300 text-slate-950 scale-95'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                        }`}
+                      >
+                        {captchaStatus === 'SUCCESS'
+                          ? '🍻 ĐÃ RÓT CHUẨN!'
+                          : isPouringCaptcha
+                          ? '⏳ THẢ TAY ĐÚNG VẠCH...'
+                          : '🍺 GIỮ ĐỂ RÓT BIA'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Thông báo lỗi nếu chưa qua Captcha */}
+                  {authErrorMsg && (
+                    <div className="bg-rose-950/90 border border-rose-500 text-rose-200 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 animate-bounce">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{authErrorMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Nút Submit Chính: XÁC NHẬN VÀO BÀN NHẬU */}
+                  <button
+                    type="button"
+                    onClick={handleCompleteAuthSubmit}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-base shadow-[0_5px_0_#9a3412] active:translate-y-1 transition flex items-center justify-center gap-2"
+                  >
+                    <Beer className="w-5 h-5 fill-slate-950" />
+                    <span>
+                      {authTab === 'SIGNUP'
+                        ? 'CẤP HỘ CHIẾU TỬU LƯỢNG & VÀO BÀN NGAY!'
+                        : authTab === 'GUEST'
+                        ? 'NHẢY LÊN GHẾ NHỰA ĐỎ NGAY (1, 2, 3 DZÔ!)'
+                        : 'XUẤT TRÌNH VÉ & VÀO BÀN NHẬU NGAY!'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* ===============================================================
+                  CỘT PHẢI (5 CỘT): BẢO VỆ CẬU VÀNG + THẺ HỘ CHIẾU TỬU LƯỢNG LIVE
+              =============================================================== */}
+              <div className="lg:col-span-5 flex flex-col justify-between gap-4 bg-slate-900/90 border-2 border-amber-500/50 rounded-3xl p-4 sm:p-5 shadow-2xl">
+                {/* 1. Mascot Bảo Vệ Quán "Cậu Vàng" Tương Tác */}
+                <div className="bg-slate-950/90 border border-amber-500/30 rounded-2xl p-3 text-center">
+                  <div className="flex items-center justify-between text-[10px] font-black uppercase text-amber-400 mb-1">
+                    <span>🐕 BẢO VỆ CỔNG QUÁN: CẬU VÀNG</span>
+                    <span className="text-emerald-400">● ĐANG CANH CỬA</span>
+                  </div>
+                  <CauVangBouncerSVG
+                    isPasswordFocused={isPasswordFocused}
+                    showPassword={showPassword}
+                    captchaStatus={captchaStatus}
+                  />
+                </div>
+
+                {/* 2. THẺ CĂN CƯỚC DÂN NHẬU / HỘ CHIẾU TỬU LƯỢNG (LIVE PREVIEW CARD) */}
+                <div className="relative bg-gradient-to-br from-[#fef3c7] via-[#fde68a] to-[#f59e0b] text-slate-950 rounded-2xl p-4 border-4 border-amber-700 shadow-[0_12px_30px_rgba(0,0,0,0.6)] overflow-hidden">
+                  {/* Mộc Đỏ Đóng Dấu Kiểm Định Độ Lầy */}
+                  <div className="absolute -right-2 top-8 rotate-12 border-4 border-red-700/80 text-red-700/85 px-2.5 py-1 rounded-xl font-black text-[10px] uppercase tracking-wider pointer-events-none shadow-sm bg-amber-100/60">
+                    ★ ĐÃ KIỂM ĐỊNH ĐỘ LẦY ★
+                  </div>
+
+                  {/* Header Hộ Chiếu */}
+                  <div className="border-b-2 border-amber-900/30 pb-2 mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-red-800">
+                        CỘNG HÒA XÃ HỘI DÂN NHẬU BỜ KÈ
+                      </p>
+                      <h3 className="text-base font-black uppercase tracking-tight text-slate-950">
+                        🪪 HỘ CHIẾU TỬU LƯỢNG (LIVE ID)
+                      </h3>
+                    </div>
+                    <span className="font-mono text-[10px] font-black bg-amber-900 text-amber-100 px-2 py-0.5 rounded">
+                      No. 6868-VN
+                    </span>
+                  </div>
+
+                  {/* Nội dung Thẻ Căn Cước */}
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-20 h-20 rounded-2xl bg-slate-900 border-2 border-amber-800 flex flex-col items-center justify-center shrink-0 shadow-inner">
+                      <span className="text-4xl">{selectedSpecies.emoji}</span>
+                      <span className="text-[9px] font-black text-amber-300 uppercase mt-0.5">
+                        {selectedSpecies.name}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-xs flex-1 min-w-0">
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-amber-900 block">
+                          BIỆT DANH BÀN NHẬU:
+                        </span>
+                        <p className="font-black text-sm text-red-900 truncate">
+                          {authTab === 'SIGNUP'
+                            ? signupNickname || 'Chiến Thần Bờ Kè'
+                            : authTab === 'GUEST'
+                            ? guestNickname
+                            : loginIdentifier.split('@')[0]}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1 pt-0.5">
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-amber-900 block">
+                            HỆ KHI SAY:
+                          </span>
+                          <p className="font-extrabold text-[11px] text-slate-900 truncate">
+                            {signupArchetype.icon} {signupArchetype.name}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-amber-900 block">
+                            ĐÔ KHAI BÁO:
+                          </span>
+                          <p className="font-extrabold text-[11px] text-red-800">
+                            {signupTolerance}% Cồn ({Math.round(signupTolerance / 8)} Lon)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Thẻ: Vũ khí sở trường & Quà Tân Thủ */}
+                  <div className="mt-3 pt-2 border-t border-amber-900/25 flex items-center justify-between text-[10px] font-black">
+                    <span className="text-amber-950">
+                      🩴 Vũ khí: Dép Tổ Ong Vàng + Đậu Phộng
+                    </span>
+                    <span className="bg-red-700 text-white px-2 py-0.5 rounded-full">
+                      Quà vào bàn: +500 🪙
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hướng dẫn nhỏ */}
+                <div className="text-[11px] text-slate-400 text-center italic">
+                  💡 Mẹo: Bấm vào ô Mật Khẩu để xem Cậu Vàng lấy ly bia che mắt, hoặc bấm nút{' '}
+                  <b className="text-emerald-300">Xem MongoDB Payload</b> ở góc trên!
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* =================================================================
+              DRAWER XEM TRỰC TIẾP DOCUMENT MONGODB (`players` COLLECTION)
+          ================================================================= */}
+          {showMongoDrawer && (
+            <div className="relative z-20 max-w-6xl w-full mx-auto mt-2 bg-slate-950/95 border-2 border-emerald-400 rounded-2xl p-4 shadow-2xl animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-emerald-500/30 pb-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-black uppercase text-emerald-300">
+                    MONGODB LIVE DOCUMENT PREVIEW — db.players.insertOne(...)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(JSON.stringify(liveMongoDocument, null, 2));
+                      setCopiedJson(true);
+                      setTimeout(() => setCopiedJson(false), 1800);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 text-[11px] font-black flex items-center gap-1 transition"
+                  >
+                    {copiedJson ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedJson ? 'Đã Copy JSON' : 'Copy JSON'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowMongoDrawer(false)}
+                    className="text-xs text-slate-400 hover:text-white px-2"
+                  >
+                    Đóng ✕
+                  </button>
+                </div>
+              </div>
+              <pre className="text-[11px] font-mono text-emerald-300 bg-slate-900/90 p-3 rounded-xl overflow-x-auto max-h-44">
+                {JSON.stringify(liveMongoDocument, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Footer Cổng Quán */}
+          <div className="relative z-10 text-center text-[11px] text-slate-400 py-1">
+            © 2026 QUÁN NHẬU TƯ ĐỰC BỜ KÈ • Chơi game có trách nhiệm, uống bia ảo không lái xe thật!
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL QUÊN MẬT KHẨU: "KHÔI PHỤC TRÍ NHỚ SAU CƠN SAY"
+      ===================================================================== */}
+      {forgotPassModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border-2 border-amber-400 rounded-3xl p-6 text-center shadow-2xl animate-fadeIn">
+            <div className="text-5xl mb-2">🧊🧻</div>
+            <h3 className="text-xl font-black text-amber-300 uppercase">
+              KHÔI PHỤC TRÍ NHỚ SAU CƠN SAY
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              Hôm qua uống tới bến quên mất ám hiệu vào bàn? Nhập email để Bà Chủ Quán gửi ngay{' '}
+              <b className="text-sky-300">1 Chiếc Khăn Lạnh Ướp Đá</b> giúp bạn tỉnh rượu nhớ lại
+              mật khẩu!
+            </p>
+
+            {!forgotPassSent ? (
+              <div className="mt-4 space-y-3 text-left">
+                <div>
+                  <label className="text-[11px] font-black uppercase text-amber-300">
+                    Câu hỏi kiểm tra trí nhớ: Đêm qua ai là người trả Bill?
+                  </label>
+                  <select className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white">
+                    <option>Em ngủ gục từ phút thứ 5 nên không biết gì hết!</option>
+                    <option>Thằng Hùng Đại Ca bị dán giấy lên trán trả!</option>
+                    <option>Cả bàn chạy trốn bị Bà Chủ phi dép tổ ong!</option>
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    sfx.playBottleCapOpen();
+                    setForgotPassSent(true);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-black text-xs shadow"
+                >
+                  🧊 GỬI KHĂN LẠNH KHÔI PHỤC MẬT KHẨU!
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 bg-emerald-950/60 border border-emerald-400 rounded-2xl p-3 text-xs text-emerald-200 font-bold">
+                ✅ Đã ném 1 chiếc Khăn Lạnh Giải Rượu vào hòm thư <b>{loginIdentifier}</b>! Mật khẩu
+                tạm của bạn là: <code className="text-yellow-300">khongsaykhongve123</code>
+              </div>
+            )}
+
+            <button
+              onClick={() => setForgotPassModal(false)}
+              className="mt-4 w-full py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold"
+            >
+              Quay Lại Cổng Quán
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL CHÚC MỪNG VÀO BÀN THÀNH CÔNG + TẶNG QUÀ TÂN THỦ
+      ===================================================================== */}
+      {authSuccessModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 border-4 border-amber-400 rounded-3xl p-6 text-center shadow-[0_0_60px_rgba(245,158,11,0.85)] animate-bounce">
+            <div className="text-5xl mb-2">🍻🎉</div>
+            <span className="text-[10px] font-black uppercase bg-emerald-400 text-slate-950 px-3 py-0.5 rounded-full">
+              ĐÃ ĐÓNG MỘC HỘ CHIẾU TỬU LƯỢNG
+            </span>
+            <h2 className="text-2xl font-black text-white mt-2">
+              CHÀO MỪNG ĐẠI CA VÀO BÀN NHẬU!
+            </h2>
+            <p className="text-xs text-amber-200 mt-1">
+              Ghế nhựa đỏ số #1 đã sẵn sàng! Bà Chủ Quán Tư Đực tặng bạn quà nhập tiệc:
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5 my-4">
+              <div className="bg-slate-900 border border-amber-400/50 rounded-2xl p-3">
+                <div className="text-2xl">🪙</div>
+                <p className="font-black text-sm text-amber-300 mt-1">+500 Nắp Bia</p>
+                <p className="text-[10px] text-slate-400">Vốn liếng gọi mồi & mua vé số</p>
+              </div>
+              <div className="bg-slate-900 border border-yellow-400/50 rounded-2xl p-3">
+                <div className="text-2xl">🩴</div>
+                <p className="font-black text-sm text-yellow-300 mt-1">Dép Tổ Ong 9999</p>
+                <p className="text-[10px] text-slate-400">Vũ khí phi tầm xa chuẩn 100%</p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                setAuthSuccessModal(false);
+                setIsAuthenticated(true);
+                handleCheersClink3D();
+              }}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500 text-slate-950 font-black text-sm shadow-lg hover:scale-105 transition"
+            >
+              🍺 NGỒI VÀO GHẾ NHỰA & HÔ "1, 2, 3 DZÔ!"
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
