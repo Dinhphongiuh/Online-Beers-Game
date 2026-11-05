@@ -60,6 +60,10 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
   onShoutCrowdDecibel,
 }) => {
   const [showVirtualJoysticks, setShowVirtualJoysticks] = useState(false);
+  // Emote/IK action row covers the scene on phones; start it collapsed there.
+  const [showQuickActions, setShowQuickActions] = useState(
+    () => typeof window === 'undefined' || window.innerWidth >= 768
+  );
   const [showControlsGuide, setShowControlsGuide] = useState(false);
 
   const leftPadRef = useRef<HTMLDivElement>(null);
@@ -119,8 +123,8 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
             ) : (
               <Camera className="w-3.5 h-3.5 text-amber-400" />
             )}
-            <span>{cameraLabel[ikState.cameraMode]}</span>
-            <span className="px-1 py-0.2 bg-black/30 rounded text-[9px] font-mono">
+            <span className="hidden sm:inline">{cameraLabel[ikState.cameraMode]}</span>
+            <span className="hidden sm:inline px-1 py-0.2 bg-black/30 rounded text-[9px] font-mono">
               Tab/V
             </span>
           </button>
@@ -140,12 +144,15 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
             ) : (
               <Armchair className="w-3.5 h-3.5 text-emerald-400" />
             )}
-            <span>
+            <span className="hidden sm:inline">
               {ikState.controlMode === 'free_roam'
                 ? 'Đang Đứng Tự Do (WASD)'
                 : 'Đang Ngồi Ghế Nhựa'}
             </span>
-            <span className="px-1 py-0.2 bg-black/30 rounded text-[9px] font-mono">
+            <span className="sm:hidden">
+              {ikState.controlMode === 'free_roam' ? 'Đứng' : 'Ngồi'}
+            </span>
+            <span className="hidden sm:inline px-1 py-0.2 bg-black/30 rounded text-[9px] font-mono">
               Phím E
             </span>
           </button>
@@ -163,8 +170,11 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
             <Snowflake className="w-3.5 h-3.5 text-cyan-400" />
             <span>
               {ikState.coldTowelBuffTimer > 0
-                ? `Khăn Lạnh (${Math.ceil(ikState.coldTowelBuffTimer)}s)`
-                : 'Khăn Lạnh [C]'}
+                ? `${Math.ceil(ikState.coldTowelBuffTimer)}s`
+                : 'Khăn Lạnh'}
+              <span className="hidden sm:inline">
+                {ikState.coldTowelBuffTimer > 0 ? ' Khăn Lạnh' : ' [C]'}
+              </span>
             </span>
           </button>
 
@@ -182,6 +192,21 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
             <span className="hidden sm:inline">Joystick Ảo</span>
           </button>
 
+          {/* Emote / IK Action Row Toggle */}
+          <button
+            onClick={() => setShowQuickActions((prev) => !prev)}
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1 shadow-lg transition-all active:scale-95 ${
+              showQuickActions
+                ? 'bg-zinc-800 text-amber-300 border-amber-500/60'
+                : 'bg-zinc-900/95 text-zinc-300 border-zinc-700 hover:bg-zinc-800'
+            }`}
+            title="Hiện/Ẩn thanh biểu cảm & thao tác tay"
+          >
+            <span>😂</span>
+            <span className="hidden sm:inline">Biểu Cảm</span>
+            <span className="text-zinc-400">{showQuickActions ? '▴' : '▾'}</span>
+          </button>
+
           {/* Controls Cheat-Sheet Toggle */}
           <button
             onClick={() => setShowControlsGuide((prev) => !prev)}
@@ -193,6 +218,7 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
         </div>
 
         {/* Emotes & Slogan Quick Bar [Phím 1, 2, 3, 4] + IK Hand Actions */}
+        {showQuickActions && (
         <div className="flex flex-wrap items-center gap-1 pointer-events-auto">
           {[
             { id: 'laugh_slap' as CharacterEmote, key: '1', label: '😂 Đập Bàn Cười' },
@@ -211,7 +237,7 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
                   : 'bg-zinc-900/90 text-zinc-300 border-zinc-800 hover:border-zinc-600'
               }`}
             >
-              <span className="opacity-60 mr-1">[{em.key}]</span>
+              <span className="hidden sm:inline opacity-60 mr-1">[{em.key}]</span>
               {em.label}
             </button>
           ))}
@@ -253,6 +279,7 @@ export const CameraAndControlsHUD: React.FC<CameraAndControlsHUDProps> = ({
             </button>
           )}
         </div>
+        )}
 
         {/* Collapsible Controls Guide Card */}
         {showControlsGuide && (

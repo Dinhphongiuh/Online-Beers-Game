@@ -94,6 +94,10 @@ export const PhiQuanMaiAnhCallHUD: React.FC<PhiQuanMaiAnhCallHUDProps> = ({
   onTriggerNgaPhanDestroyFood,
 }) => {
   const [dialogueIndex, setDialogueIndex] = useState(0);
+  // NPC cards take most of the screen on phones, so start collapsed there.
+  const [showNpcCards, setShowNpcCards] = useState(
+    () => typeof window === 'undefined' || window.innerWidth >= 1024
+  );
   const [treeLineIndex, setTreeLineIndex] = useState(0);
 
   const isCalling = !!phiQuanPlayer?.isCallingMaiAnh;
@@ -144,8 +148,23 @@ export const PhiQuanMaiAnhCallHUD: React.FC<PhiQuanMaiAnhCallHUDProps> = ({
   return (
     <>
       {/* 1. Compact Floating Status Pills for NPC Phi Quân, NPC Khoa Nguyễn & NPC Nga Phan (Top-Right below TopBar) */}
-      <div className="fixed top-14 right-3 z-20 pointer-events-auto flex flex-col items-end gap-1.5">
-        {!isCalling && !isHeartbroken && (
+      <div className="fixed top-[6.5rem] sm:top-14 right-3 z-20 pointer-events-auto flex flex-col items-end gap-1.5">
+        <button
+          onClick={() => setShowNpcCards((prev) => !prev)}
+          className="flex items-center gap-1.5 bg-zinc-900/92 border border-zinc-700 hover:border-amber-500/60 rounded-xl px-2.5 py-1 shadow-lg text-[10px] font-mono font-bold text-zinc-200 active:scale-95 transition-all"
+          title={showNpcCards ? 'Thu gọn bảng dân nhậu' : 'Mở bảng dân nhậu'}
+        >
+          {phiQuanPlayer && !isCalling && !isHeartbroken && (
+            <span className={alc >= 80 ? 'text-rose-400' : 'text-amber-300'}>🐼{alc}%</span>
+          )}
+          {khoaNguyenPlayer && !isKhoaClimbing && (
+            <span className={khoaAlc >= 80 ? 'text-emerald-400' : 'text-emerald-300'}>🐻{khoaAlc}%</span>
+          )}
+          {ngaPhanPlayer && <span className="text-amber-200">🐹🥤</span>}
+          <span className="text-zinc-400">{showNpcCards ? '▴' : '▾'}</span>
+        </button>
+
+        {showNpcCards && phiQuanPlayer && !isCalling && !isHeartbroken && (
           <div className="flex items-center gap-2 bg-zinc-900/92 border border-pink-500/50 rounded-2xl px-3 py-1.5 shadow-xl backdrop-blur-md">
             <div className="flex items-center gap-1.5">
               <span className="text-lg">🐼</span>
@@ -189,7 +208,7 @@ export const PhiQuanMaiAnhCallHUD: React.FC<PhiQuanMaiAnhCallHUDProps> = ({
         )}
 
         {/* Compact Status Pill for NPC Khoa Nguyễn (Gấu Nâu >= 80% leo cây xanh) */}
-        {khoaNguyenPlayer && !isKhoaClimbing && (
+        {showNpcCards && khoaNguyenPlayer && !isKhoaClimbing && (
           <div className="flex items-center gap-2 bg-zinc-900/92 border border-emerald-500/50 rounded-2xl px-3 py-1.5 shadow-xl backdrop-blur-md">
             <div className="flex items-center gap-1.5">
               <span className="text-lg">🐻</span>
@@ -224,7 +243,7 @@ export const PhiQuanMaiAnhCallHUD: React.FC<PhiQuanMaiAnhCallHUDProps> = ({
         )}
 
         {/* Compact Status Pill for NPC Nga Phan (Chuột Hamster Đuôi Dài - Chỉ uống Coca 0% Cồn & Phá Mồi) */}
-        {ngaPhanPlayer && (
+        {showNpcCards && ngaPhanPlayer && (
           <div className="flex items-center gap-2 bg-zinc-900/92 border border-amber-500/60 rounded-2xl px-3 py-1.5 shadow-xl backdrop-blur-md">
             <div className="flex items-center gap-1.5">
               <span className="text-lg">🐹</span>
@@ -434,7 +453,7 @@ export const PhiQuanMaiAnhCallHUD: React.FC<PhiQuanMaiAnhCallHUDProps> = ({
 
       {/* 4. ACTIVE OVERLAY: KHOA NGUYỄN >= 80% ALCOHOL CLIMBING THE GREEN TREE! */}
       {isKhoaClimbing && (
-        <div className="fixed bottom-24 left-3 z-30 w-[355px] max-w-[92vw] pointer-events-auto animate-in fade-in slide-in-from-left-5 duration-200">
+        <div className="fixed bottom-40 left-3 z-30 w-[355px] max-w-[92vw] pointer-events-auto animate-in fade-in slide-in-from-left-5 duration-200">
           <div className="bg-zinc-950/95 border-2 border-emerald-500 rounded-3xl p-3.5 shadow-[0_0_35px_rgba(16,185,129,0.4)] text-white">
             <div className="flex items-center justify-between gap-2 border-b border-emerald-500/30 pb-2 mb-2">
               <div className="flex items-center gap-2">

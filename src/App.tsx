@@ -55,9 +55,11 @@ import {
 } from './components/PhiQuanMaiAnhCallHUD';
 import { OpenWorldSandboxHUD } from './components/OpenWorldSandboxHUD';
 import confetti from 'canvas-confetti';
+import { DRUNK_SPEEDS, LobbyConfig, THEME_NAMES } from './lobby/lobbyData';
+import type { GraphicsQuality } from './lobby/LobbyPanels';
 import { MessageSquare, CloudRain, ShieldAlert, Umbrella } from 'lucide-react';
 
-const INITIAL_PLAYERS: Player[] = [
+export const INITIAL_PLAYERS: Player[] = [
   {
     id: 'user',
     name: 'Bợm Nhậu (Bạn)',
@@ -158,7 +160,7 @@ const INITIAL_PLAYERS: Player[] = [
   },
 ];
 
-const INITIAL_DISHES: FoodDish[] = [
+export const INITIAL_DISHES: FoodDish[] = [
   {
     id: 'peanut',
     name: 'Đậu Phộng Rang Tỏi Ớt',
@@ -239,17 +241,30 @@ const INITIAL_DISHES: FoodDish[] = [
   },
 ];
 
-export default function App() {
+/** Seats the user (with their lobby skin) plus the friends who joined in the lobby. */
+function buildTablePlayers(config?: LobbyConfig): Player[] {
+  if (!config) return INITIAL_PLAYERS;
+  const user: Player = { ...INITIAL_PLAYERS[0], name: config.playerName, ...config.skin };
+  const friends = config.squadIds
+    .map((id) => INITIAL_PLAYERS.find((p) => p.id === id))
+    .filter((p): p is Player => !!p);
+  return [user, ...friends].map((p, i) => ({ ...p, seatIndex: i }));
+}
+
+export default function App({
+  lobbyConfig,
+  graphics = 'high',
+}: { lobbyConfig?: LobbyConfig; graphics?: GraphicsQuality } = {}) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
   const walkStepCountRef = useRef<number>(0);
 
   // Table State
   const [tableState, setTableState] = useState<TableState>({
-    roomId: 'TRẠM-NHẬU-8888',
-    theme: 'sidewalk',
-    themeName: 'Vỉa Hè Đèn Neon Sài Gòn',
-    players: INITIAL_PLAYERS,
+    roomId: lobbyConfig ? `TRẠM-NHẬU-${lobbyConfig.roomCode}` : 'TRẠM-NHẬU-8888',
+    theme: lobbyConfig?.theme ?? 'sidewalk',
+    themeName: lobbyConfig ? THEME_NAMES[lobbyConfig.theme] : 'Vỉa Hè Đèn Neon Sài Gòn',
+    players: buildTablePlayers(lobbyConfig),
     activeMinigame: 'none',
     beerTowerLevel: 90,
     foodDishes: INITIAL_DISHES,
@@ -398,6 +413,7 @@ export default function App() {
     const scene = initThreeScene();
     sceneRef.current = scene;
     scene.mount(canvasMountRef.current);
+    scene.setGraphicsQuality(graphics);
     scene.updatePlayers(tableState.players);
     scene.updateFoodDishes(tableState.foodDishes);
 
@@ -2258,9 +2274,54 @@ export default function App() {
         showToast(
           '🎤 Đã bật Mic Lip-Sync & Hô Dzô! Nói chuyện để môi mấp máy, cười lớn để đập bàn!'
         );
+      } else {
+        micUnavailableRef.current = true;
       }
     }
   };
+
+  // Lobby rule "Bắt buộc hô 1, 2, 3 Dzô vào Mic": the cheers button only arms the mic.
+  // If the mic can't be opened, fall back to the button so nobody gets stuck sober.
+  const micUnavailableRef = useRef(false);
+  const handleCheersWithTableRules = () => {
+    if (
+      lobbyConfig?.rules.micDzo &&
+      !tableState.isMicCheersActive &&
+      !micUnavailableRef.current
+    ) {
+      showToast('🎤 Luật bàn: phải hô "1, 2, 3 DZÔ!" vào Mic mới được uống! Đang bật mic…');
+      handleToggleMic();
+      return;
+    }
+    handleCheers();
+  };
+
+  // Lobby "Độ Đô Của Bàn": scale every alcohol gain of the user by the table's drunk speed
+  const lastUserAlcoholRef = useRef(userPlayer.alcoholLevel);
+  useEffect(() => {
+    const multiplier =
+      DRUNK_SPEEDS.find((s) => s.id === lobbyConfig?.drunkSpeed)?.multiplier ?? 1;
+    const prev = lastUserAlcoholRef.current;
+    const cur = userPlayer.alcoholLevel;
+    lastUserAlcoholRef.current = cur;
+    if (multiplier === 1 || cur <= prev) return;
+    const adjusted = Math.max(0, Math.min(100, Math.round(prev + (cur - prev) * multiplier)));
+    if (adjusted === cur) return;
+    lastUserAlcoholRef.current = adjusted;
+    setTableState((ts) => ({
+      ...ts,
+      players: ts.players.map((p) => (p.isUser ? { ...p, alcoholLevel: adjusted } : p)),
+    }));
+  }, [userPlayer.alcoholLevel]);
+
+  // Welcome toast when arriving from the lobby
+  useEffect(() => {
+    if (!lobbyConfig) return;
+    const speed = DRUNK_SPEEDS.find((s) => s.id === lobbyConfig.drunkSpeed);
+    showToast(
+      `🍻 DZÔÔÔ! Bàn #${lobbyConfig.roomCode} • ${THEME_NAMES[lobbyConfig.theme]} • ${speed?.icon} ${speed?.name}`
+    );
+  }, []);
 
 
   // Interactive Chopstick Grab Execution (Self, Feed Friend, Spicy Prank, Last-Piece Clash)
@@ -2918,6 +2979,11 @@ export default function App() {
 
   // Minigames Handlers
   const handleSelectMinigame = (gameId: MinigameId) => {
+    if (gameId === 'bill_fight' && lobbyConfig && !lobbyConfig.rules.billBrawl) {
+      sound.playHiccup();
+      showToast('🪑🚫 Luật bàn: cấm hỗn chiến ném ghế giành Bill! Chia đều cho lành nha anh em.');
+      return;
+    }
     sound.playDiceShake();
     if (gameId === 'truth_or_dare') {
       const activeTargets = tableState.players.filter((p) => !p.isPassedOut);
@@ -3610,6 +3676,33 @@ export default function App() {
     }
   };
 
+  // Lobby rule: "Vợ gọi điện kiểm tra" & "Công an phường dẹp vỉa hè" strike at random
+  const randomEventRef = useRef<() => void>(() => {});
+  randomEventRef.current = () => {
+    if (
+      activeModal !== 'none' ||
+      tableState.activeMinigame !== 'none' ||
+      arenaState.wifeCallActive ||
+      arenaState.urbanPatrolActive
+    ) {
+      return;
+    }
+    if (Math.random() < 0.5) handleStartWifeCallStealth();
+    else handleTriggerUrbanPatrol();
+  };
+  useEffect(() => {
+    if (!lobbyConfig?.rules.randomEvents) return;
+    let id = 0;
+    const schedule = () => {
+      id = window.setTimeout(() => {
+        randomEventRef.current();
+        schedule();
+      }, 80000 + Math.random() * 60000);
+    };
+    schedule();
+    return () => clearTimeout(id);
+  }, []);
+
   const handleStartWifeCallStealth = () => {
     sound.playBell();
     setArenaState((prev) => ({
@@ -4248,7 +4341,7 @@ export default function App() {
           arenaState.exCallQTEActive ||
           arenaState.wifeCallActive
         }
-        onCheers={handleCheers}
+        onCheers={handleCheersWithTableRules}
         onToggleMic={handleToggleMic}
         onOpenFoodModal={() =>
           setActiveModal((prev) => (prev === 'food_grab' ? 'none' : 'food_grab'))

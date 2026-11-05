@@ -456,8 +456,8 @@ export const OverheadDrunkChatHUD: React.FC<OverheadDrunkChatHUDProps> = ({
         </div>
       )}
 
-      {/* 4. FLOATING QUICK-CHAT & KEYBOARD BUTTONS (Bottom-Right above Dock) */}
-      <div className="fixed bottom-20 right-3 z-30 flex flex-col items-end gap-2 pointer-events-auto">
+      {/* 4. FLOATING QUICK-CHAT & KEYBOARD BUTTONS (Bottom-Left above Dock; bottom-right belongs to the Open-World HUD) */}
+      <div className="fixed bottom-[6.5rem] left-3 z-30 flex flex-col items-start gap-2 pointer-events-auto">
         {/* Quick-Chat Wheel Popup [Q] */}
         {isWheelOpen && (
           <div className="w-72 sm:w-80 bg-zinc-950/95 border-2 border-amber-500/80 rounded-3xl p-3 shadow-2xl text-white mb-1">
@@ -527,7 +527,7 @@ export const OverheadDrunkChatHUD: React.FC<OverheadDrunkChatHUDProps> = ({
             title="Mở Bánh Xe Câu Thoại Nhanh (Phím Q)"
           >
             <Compass className="w-4 h-4" />
-            <span>Thoại Nhanh [Q]</span>
+            <span className="hidden sm:inline">Thoại Nhanh [Q]</span>
           </button>
 
           <button
@@ -540,7 +540,7 @@ export const OverheadDrunkChatHUD: React.FC<OverheadDrunkChatHUDProps> = ({
             title="Gõ Bong Bóng Chat 3D & Bộ Lọc Say Rượu (Phím Enter)"
           >
             <MessageCircle className="w-4 h-4" />
-            <span>Chat Bàn Phím Say [Enter]</span>
+            <span>Chat<span className="hidden sm:inline"> Bàn Phím Say [Enter]</span></span>
           </button>
         </div>
       </div>

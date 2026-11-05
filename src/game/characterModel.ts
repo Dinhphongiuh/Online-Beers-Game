@@ -43,6 +43,7 @@ export interface CharacterRig {
       isCallingMaiAnh?: boolean;
       isHeartbrokenMaiAnh?: boolean;
       isClimbingTree?: boolean;
+      isWalkingToTree?: boolean;
     }
   ) => void;
   setDoodles: (doodles: string[]) => void;
@@ -54,6 +55,8 @@ export interface CharacterRig {
     avatar: CharacterAvatar,
     specialStatus?: string | null
   ) => void;
+  /** Force-hide the overhead nameplate (the lobby draws its own HTML badges). */
+  setNameplateHidden: (hidden: boolean) => void;
 }
 
 export function createChibiCharacter(
@@ -565,6 +568,8 @@ export function createChibiCharacter(
   body.add(nameplateSprite);
 
   let lastNameplateKey = '';
+  let nameplateForceHidden = false;
+  let nameplateIsUser = false;
 
   const setNameplate = (
     name: string,
@@ -574,6 +579,11 @@ export function createChibiCharacter(
     charAvatar: CharacterAvatar,
     specialStatus?: string | null
   ) => {
+    // The user's own stats already live in the TopBar; their nameplate sits right
+    // in front of the camera and covers the table, so only show it for NPCs.
+    nameplateIsUser = isUser;
+    nameplateSprite.visible = !isUser && !nameplateForceHidden;
+
     const roundedAlc = Math.round(alcoholLevel);
     const cacheKey = `${name}|${title}|${roundedAlc}|${isUser}|${charAvatar}|${specialStatus || ''}`;
     if (cacheKey === lastNameplateKey || !nameCtx) return;
@@ -1299,6 +1309,10 @@ export function createChibiCharacter(
     update,
     setDoodles,
     setNameplate,
+    setNameplateHidden: (hidden: boolean) => {
+      nameplateForceHidden = hidden;
+      nameplateSprite.visible = !nameplateIsUser && !hidden;
+    },
   };
 }
 

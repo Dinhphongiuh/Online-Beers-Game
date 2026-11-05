@@ -127,7 +127,7 @@ export const OpenWorldSandboxHUD: React.FC<OpenWorldSandboxHUDProps> = ({
   const npcFriends = players.filter((p) => !p.isUser);
 
   return (
-    <div className="fixed bottom-20 right-3 z-20 pointer-events-auto flex flex-col items-end gap-1.5 max-w-[95vw]">
+    <div className="fixed bottom-[6.5rem] right-3 z-20 pointer-events-auto flex flex-col items-end gap-1.5 max-w-[95vw]">
       {/* Faceplant / Cleaver Chase / Crawling Quick Alert Banner */}
       {ikState.isFaceplanted && (
         <div className="bg-rose-950/95 border-2 border-rose-400 rounded-2xl px-3.5 py-2 shadow-2xl flex items-center gap-2.5 text-white animate-bounce">
@@ -170,7 +170,8 @@ export const OpenWorldSandboxHUD: React.FC<OpenWorldSandboxHUDProps> = ({
             className="px-3 py-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-xl border border-emerald-300/50 flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
           >
             <Footprints className="w-4 h-4 animate-bounce" />
-            <span>Đứng Dậy Đi Dạo Khắp Quán [E]</span>
+            <span className="hidden sm:inline">Đứng Dậy Đi Dạo Khắp Quán [E]</span>
+            <span className="sm:hidden">Đi Dạo</span>
           </button>
         )}
 
@@ -182,8 +183,8 @@ export const OpenWorldSandboxHUD: React.FC<OpenWorldSandboxHUDProps> = ({
               : 'bg-zinc-900/92 border-zinc-700 text-zinc-100 hover:border-amber-400/60'
           }`}
         >
-          <span>🗺️ Tổ Hợp Phố Nhậu Open-World</span>
-          <span className="px-1.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-[10px] text-amber-200">
+          <span>🗺️<span className="hidden sm:inline"> Tổ Hợp Phố Nhậu Open-World</span></span>
+          <span className="hidden sm:inline px-1.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-[10px] text-amber-200">
             {currentZone.shortName}
           </span>
           {isExpanded ? (

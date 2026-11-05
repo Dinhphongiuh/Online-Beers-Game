@@ -76,6 +76,39 @@ export interface SceneController {
   onIndustrialFanClick?: () => void;
   onPassedOutFaceClick?: (playerId: string) => void;
   onPointerAimChange?: (aimX: number, aimY: number) => void;
+
+  // ---- 3D Interactive Lobby (Main Menu) ----
+  setLobbyMode: (mode: LobbyMode) => void;
+  /** Screen-space anchors (px, relative to the mount div) for each of the 8 lobby seats. */
+  getLobbyAnchors: () => LobbyAnchor[];
+  triggerLobbyReaction: (playerId: string, kind: LobbyReaction) => void;
+  onLobbyCharacterClick?: (playerId: string) => void;
+  onLobbySeatClick?: (seatIndex: number) => void;
+  /** 'low' drops pixel ratio to 1 and disables shadows for weak devices. */
+  setGraphicsQuality: (quality: 'low' | 'high') => void;
+}
+
+export type LobbyMode = 'off' | 'lobby' | 'wardrobe';
+export type LobbyReaction = 'slap' | 'tickle' | 'munch';
+
+export interface LobbyAnchor {
+  seatIndex: number;
+  x: number;
+  y: number;
+  onScreen: boolean;
+  playerId: string | null;
+  /** True once the player has run in from the street and hopped onto the stool. */
+  seated: boolean;
+}
+
+export const LOBBY_SEAT_COUNT = 8;
+const LOBBY_TABLE_RADIUS = 1.95;
+const LOBBY_STREET_SPAWN_Z = 5.6;
+const LOBBY_RUN_SPEED = 2.6;
+const WARDROBE_SPOT = new THREE.Vector3(3.0, 0, 3.05);
+
+function lobbySeatAngle(seatIndex: number) {
+  return (seatIndex / LOBBY_SEAT_COUNT) * Math.PI * 2 + Math.PI / 2;
 }
 
 // Reusable math helpers outside render loop
@@ -188,6 +221,17 @@ export function initThreeScene(): SceneController {
     active: false,
     center: new THREE.Vector3(0, 1.08, 0),
   };
+
+  // 3D Lobby state
+  let lobbyMode: LobbyMode = 'off';
+  const lobbyEmptyStools: THREE.Group[] = [];
+  let wardrobeSet: THREE.Group | null = null;
+  const lobbyWaypoints = new Map<string, { x: number; z: number }[]>();
+  const lobbyReactions = new Map<string, { kind: LobbyReaction; t: number; dur: number }>();
+  const _projVec = new THREE.Vector3();
+  let onLobbyCharacterClickCb: ((playerId: string) => void) | undefined;
+  let onLobbySeatClickCb: ((seatIndex: number) => void) | undefined;
+  let onResizeHandler: (() => void) | null = null;
 
   // Player rigs mapped by player id
   const playerRigs = new Map<string, { rig: CharacterRig; stool: THREE.Group; player: Player }>();
@@ -657,6 +701,16 @@ export function initThreeScene(): SceneController {
 
     if (intersects.length > 0) {
       for (const hit of intersects) {
+        // Raycaster ignores `visible`; skip hidden things (e.g. hidden nameplate sprites)
+        let hidden = false;
+        for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
+          if (!o.visible) {
+            hidden = true;
+            break;
+          }
+        }
+        if (hidden) continue;
+
         // 1. Crocodile tooth hit
         if (crocodile?.group.visible && hit.object.userData?.toothIndex !== undefined) {
           const tIdx = hit.object.userData.toothIndex;
@@ -680,6 +734,16 @@ export function initThreeScene(): SceneController {
         // 3. Food item, Ice Bucket, WC Booth, or Passed-out face hit
         let p: THREE.Object3D | null = hit.object;
         while (p && p !== scene) {
+          if (lobbyMode !== 'off') {
+            if (p.userData?.playerId) {
+              onLobbyCharacterClickCb?.(p.userData.playerId);
+              return;
+            }
+            if (p.userData?.lobbySeatIndex !== undefined) {
+              onLobbySeatClickCb?.(p.userData.lobbySeatIndex);
+              return;
+            }
+          }
           if (p.userData?.isFood) {
             onFoodClickCb?.(p.userData.foodType);
             return;
@@ -725,6 +789,208 @@ export function initThreeScene(): SceneController {
             return;
           }
           p = p.parent;
+        }
+      }
+    }
+  }
+
+  function createWardrobeSet(): THREE.Group {
+    // Sidewalk barber mirror on a brick wall + bamboo clothes-drying pole
+    const group = new THREE.Group();
+    const brick = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 2.2, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.95 })
+    );
+    brick.position.set(0, 1.1, -0.75);
+    brick.receiveShadow = true;
+    group.add(brick);
+    const mortarMat = new THREE.MeshBasicMaterial({ color: 0xd6d3d1 });
+    for (let row = 1; row < 11; row++) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.012), mortarMat);
+      line.position.set(0, row * 0.2, -0.688);
+      group.add(line);
+    }
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.95, 0.05),
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 })
+    );
+    frame.position.set(-0.75, 1.35, -0.67);
+    group.add(frame);
+    const mirror = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.62, 0.85),
+      new THREE.MeshStandardMaterial({ color: 0xe0f2fe, metalness: 1, roughness: 0.05 })
+    );
+    mirror.position.set(-0.75, 1.35, -0.64);
+    group.add(mirror);
+
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.7 });
+    [0.65, 1.9].forEach((x) => {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.9, 8), poleMat);
+      post.position.set(x, 0.95, -0.45);
+      group.add(post);
+    });
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.3, 8), poleMat);
+    rail.rotation.z = Math.PI / 2;
+    rail.position.set(1.275, 1.85, -0.45);
+    group.add(rail);
+    const clothes: [number, number][] = [
+      [0.9, 0xdc2626], // áo ba lỗ đỏ
+      [1.2, 0xf4f4f5], // áo ba lỗ trắng
+      [1.5, 0x16a34a], // quần đùi hoa
+      [1.75, 0xfacc15], // áo vàng
+    ];
+    clothes.forEach(([x, color], i) => {
+      const shirt = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, i === 2 ? 0.22 : 0.34, 0.02),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+      );
+      shirt.position.set(x, i === 2 ? 1.72 : 1.66, -0.45);
+      shirt.userData.swayPhase = i * 1.3;
+      shirt.userData.isWardrobeCloth = true;
+      group.add(shirt);
+    });
+    // Dép tổ ong on the ground
+    const sandalMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.8 });
+    [-0.09, 0.09].forEach((x) => {
+      const sandal = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.03, 0.26), sandalMat);
+      sandal.position.set(0.7 + x, 0.015, 0.3);
+      group.add(sandal);
+    });
+
+    // The "barber chair" is just another red plastic stool
+    const barberStool = createPlasticStool(0xdc2626);
+    barberStool.rotation.y = Math.PI;
+    group.add(barberStool);
+
+    group.position.copy(WARDROBE_SPOT);
+    return group;
+  }
+
+  function ensureLobbyProps() {
+    if (!scene) return;
+    if (lobbyEmptyStools.length === 0) {
+      for (let i = 0; i < LOBBY_SEAT_COUNT; i++) {
+        const stool = createPlasticStool(0xdc2626);
+        const angle = lobbySeatAngle(i);
+        stool.position.set(
+          Math.cos(angle) * LOBBY_TABLE_RADIUS,
+          0,
+          Math.sin(angle) * LOBBY_TABLE_RADIUS
+        );
+        stool.rotation.y = -angle + Math.PI / 2;
+        stool.userData.lobbySeatIndex = i;
+        stool.visible = false;
+        scene.add(stool);
+        lobbyEmptyStools.push(stool);
+      }
+    }
+    if (!wardrobeSet) {
+      wardrobeSet = createWardrobeSet();
+      wardrobeSet.visible = false;
+      scene.add(wardrobeSet);
+    }
+  }
+
+  function refreshLobbyStools() {
+    const occupied = new Set<number>();
+    playerRigs.forEach(({ player }) => occupied.add(player.seatIndex));
+    lobbyEmptyStools.forEach((stool, i) => {
+      stool.visible = lobbyMode !== 'off' && !occupied.has(i);
+    });
+  }
+
+  function updateLobbyRig(
+    rig: CharacterRig,
+    stool: THREE.Group,
+    player: Player,
+    delta: number,
+    rawDelta: number,
+    time: number,
+    extraState: { isWalkingToTree?: boolean }
+  ) {
+    const inWardrobe = player.isUser && lobbyMode === 'wardrobe';
+    const tx = inWardrobe ? WARDROBE_SPOT.x : stool.position.x;
+    const tz = inWardrobe ? WARDROBE_SPOT.z : stool.position.z;
+    const route = lobbyWaypoints.get(player.id);
+    const waypoint = route?.[0];
+    const gx = waypoint ? waypoint.x : tx;
+    const gz = waypoint ? waypoint.z : tz;
+    const dx = gx - rig.root.position.x;
+    const dz = gz - rig.root.position.z;
+    const dist = Math.hypot(dx, dz);
+    let seated = false;
+
+    if (dist > 0.06) {
+      // Waddle-run in from the street, then hop up onto the stool
+      const step = Math.min(dist, rawDelta * LOBBY_RUN_SPEED);
+      rig.root.position.x += (dx / dist) * step;
+      rig.root.position.z += (dz / dist) * step;
+      const hopping = !waypoint && !inWardrobe && dist < 0.6;
+      rig.root.position.y = hopping
+        ? Math.sin((1 - dist / 0.6) * Math.PI) * 0.5
+        : Math.abs(Math.sin(time * 16)) * 0.12;
+      rig.root.rotation.y = Math.atan2(dx, dz);
+      extraState.isWalkingToTree = true;
+    } else if (route && waypoint) {
+      route.shift();
+      if (route.length === 0) lobbyWaypoints.delete(player.id);
+    } else {
+      rig.root.position.set(tx, 0, tz);
+      rig.root.rotation.y = inWardrobe
+        ? Math.sin(time * 0.7) * 0.6
+        : -Math.atan2(tz, tx) - Math.PI / 2;
+      seated = !inWardrobe;
+    }
+
+    rig.update(delta, player.alcoholLevel, false, false, undefined, extraState);
+
+    // Idle "waiting for the crew" loops, varied per seat
+    if (seated) {
+      const phase = player.seatIndex * 1.7;
+      switch (player.seatIndex % 3) {
+        case 0: // drumming chopsticks on the table
+          rig.rightArm.rotation.x = 1.25 + Math.abs(Math.sin(time * 9 + phase)) * 0.5;
+          rig.leftArm.rotation.x = 1.25 + Math.abs(Math.cos(time * 9 + phase)) * 0.5;
+          rig.head.rotation.z = Math.sin(time * 4.5 + phase) * 0.08;
+          break;
+        case 1: // picking teeth with a toothpick, head bobbing
+          rig.rightArm.rotation.set(2.15, -0.3, -0.55);
+          rig.head.rotation.z = Math.sin(time * 2.4 + phase) * 0.12;
+          break;
+        default: // foot tapping & swaying to the music
+          rig.leftLeg.rotation.x = -Math.abs(Math.sin(time * 6 + phase)) * 0.4;
+          rig.body.rotation.z = Math.sin(time * 3 + phase) * 0.07;
+      }
+    } else if (inWardrobe && dist <= 0.06) {
+      // Showing off the outfit in the mirror
+      rig.rightArm.rotation.set(2.6, 0, -0.9);
+      rig.head.rotation.z = Math.sin(time * 2) * 0.1;
+    }
+
+    // Slap / tickle / munch reactions
+    const reaction = lobbyReactions.get(player.id);
+    if (reaction) {
+      reaction.t += rawDelta;
+      const k = reaction.t / reaction.dur;
+      if (k >= 1) {
+        lobbyReactions.delete(player.id);
+        rig.root.scale.set(1, 1, 1);
+      } else {
+        const fade = 1 - k;
+        if (reaction.kind === 'slap') {
+          rig.head.rotation.y = Math.sin(k * Math.PI) * 1.2;
+          rig.root.rotation.y += Math.sin(k * Math.PI * 2) * 0.5 * fade;
+          const squash = Math.sin(k * Math.PI * 6) * 0.14 * fade;
+          rig.root.scale.set(1 + squash, 1 - squash, 1 + squash);
+        } else if (reaction.kind === 'tickle') {
+          rig.body.rotation.z = Math.sin(reaction.t * 40) * 0.28 * fade;
+          rig.root.position.y += Math.abs(Math.sin(reaction.t * 18)) * 0.14 * fade;
+          rig.leftArm.rotation.set(2.7, 0, 0.6);
+          rig.rightArm.rotation.set(2.7, 0, -0.6);
+        } else {
+          rig.jaw.rotation.x = Math.abs(Math.sin(reaction.t * 18)) * 0.38;
+          rig.head.rotation.x = Math.sin(reaction.t * 9) * 0.08;
+          rig.rightArm.rotation.set(2.2, -0.2, -0.5);
         }
       }
     }
@@ -1102,6 +1368,7 @@ export function initThreeScene(): SceneController {
 
     if (ikTargetCursor) {
       const showCursor =
+        lobbyMode === 'off' &&
         currentIKState.controlMode === 'seated' &&
         !currentIKState.isFallenOffChair &&
         currentMinigame === 'none';
@@ -1143,7 +1410,7 @@ export function initThreeScene(): SceneController {
 
     // Update Characters Rig & Spotlight / Bỏng Mỏ Circle Run
     let spotlightTargetPos: THREE.Vector3 | null = null;
-    playerRigs.forEach(({ rig, player }) => {
+    playerRigs.forEach(({ rig, player, stool }) => {
       if (player.isCaughtSlipping) {
         spotlightTargetPos = rig.root.position;
       }
@@ -1175,6 +1442,11 @@ export function initThreeScene(): SceneController {
         isClimbingTree: false,
         isWalkingToTree: false,
       };
+
+      if (lobbyMode !== 'off') {
+        updateLobbyRig(rig, stool, player, delta, rawDelta, time, extraState);
+        return;
+      }
 
       // If poisoned by "Bom Hỗn Hợp" ("Bỏng Mỏ"), character runs wildly in circles around the table!
       if (player.isSpicedMouth) {
@@ -1400,7 +1672,32 @@ export function initThreeScene(): SceneController {
         (Math.sin(time * 2.9) * 0.7 + Math.cos(time * 1.9) * 0.3) * intensity * 0.65;
     }
 
-    if (slowMoTimer > 0) {
+    if (lobbyMode !== 'off') {
+      // Lobby: slow cinematic drift; on wide screens the table sits right of the menu panel
+      const wide = camera.aspect > 1.15;
+      wardrobeSet?.children.forEach((c) => {
+        if (c.userData.isWardrobeCloth) {
+          c.rotation.x = Math.sin(time * 1.6 + c.userData.swayPhase) * 0.18;
+        }
+      });
+      if (lobbyMode === 'wardrobe') {
+        _camTargetPos.set(WARDROBE_SPOT.x - (wide ? 0.6 : 0), 1.55, WARDROBE_SPOT.z + 3.7);
+        _camLookAt.set(WARDROBE_SPOT.x - (wide ? 1.05 : 0), wide ? 0.85 : 0.55, WARDROBE_SPOT.z - 0.2);
+        camera.fov = THREE.MathUtils.damp(camera.fov, wide ? 40 : 52, 4, rawDelta);
+      } else {
+        const drift = Math.sin(time * 0.17) * 0.35;
+        if (wide) {
+          _camTargetPos.set(1.2 + drift, 3.1, 6.0);
+          _camLookAt.set(-1.25, 0.55, 0);
+        } else {
+          // Portrait: pull far back so all 8 stools fit the narrow horizontal FOV
+          _camTargetPos.set(drift * 0.6, 6.6, 8.4);
+          _camLookAt.set(0, -0.6, 0.4);
+        }
+        camera.fov = THREE.MathUtils.damp(camera.fov, wide ? 42 : 56, 4, rawDelta);
+      }
+      camera.updateProjectionMatrix();
+    } else if (slowMoTimer > 0) {
       // Dynamic Slow-Mo Zoom into clinking glasses at center of table ("1, 2, 3 Dzô!")
       _camTargetPos.set(0.25 + swayX, 1.85 + swayY, 2.15);
       _camLookAt.set(0, 1.15, 0);
@@ -1529,6 +1826,7 @@ export function initThreeScene(): SceneController {
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
       };
+      onResizeHandler = onResize;
       window.addEventListener('resize', onResize);
       container.addEventListener('pointerdown', onPointerDown);
       container.addEventListener('pointermove', onPointerMove);
@@ -1544,6 +1842,10 @@ export function initThreeScene(): SceneController {
       }
       container?.removeEventListener('pointerdown', onPointerDown);
       container?.removeEventListener('pointermove', onPointerMove);
+      if (onResizeHandler) window.removeEventListener('resize', onResizeHandler);
+      onResizeHandler = null;
+      renderer?.domElement.remove();
+      renderer?.forceContextLoss();
       renderer?.dispose();
     },
 
@@ -1551,10 +1853,14 @@ export function initThreeScene(): SceneController {
       if (!scene) return;
       const numPlayers = players.length;
       const tableRadius = 1.95;
+      const inLobby = lobbyMode !== 'off';
 
       players.forEach((p, idx) => {
         // Place seat 0 (user) at +Math.PI/2 (foreground x=0, z=+1.95) so Over-the-Shoulder camera sees user + friends!
-        const angle = (idx / numPlayers) * Math.PI * 2 + Math.PI / 2;
+        // The lobby uses 8 fixed seats so empty stools can show a [+ Rủ Nhậu] slot.
+        const angle = inLobby
+          ? lobbySeatAngle(p.seatIndex)
+          : (idx / numPlayers) * Math.PI * 2 + Math.PI / 2;
         const x = Math.cos(angle) * tableRadius;
         const z = Math.sin(angle) * tableRadius;
 
@@ -1578,6 +1884,28 @@ export function initThreeScene(): SceneController {
           rig.root.userData = { playerId: p.id, isPassedOut: p.isPassedOut };
           rig.root.position.set(x, 0, z);
           rig.root.rotation.y = -angle - Math.PI / 2;
+          if (p.isUser && lobbyMode === 'wardrobe') {
+            // Skin swapped in the wardrobe: rebuild in place on the barber stool
+            rig.root.position.copy(WARDROBE_SPOT);
+          }
+          if (inLobby && !p.isUser) {
+            // Friends arrive from the street on the right (the menu covers the left on wide
+            // screens), circle the table along the shorter arc, then hop onto their stool
+            const spawnX = 5.5;
+            rig.root.position.set(spawnX, 0, LOBBY_STREET_SPAWN_Z);
+            const ringR = 3.0;
+            const startA = Math.atan2(LOBBY_STREET_SPAWN_Z, spawnX);
+            let diff = (angle - startA) % (Math.PI * 2);
+            if (diff > Math.PI) diff -= Math.PI * 2;
+            if (diff < -Math.PI) diff += Math.PI * 2;
+            const steps = Math.max(1, Math.ceil(Math.abs(diff) / 0.4));
+            const route: { x: number; z: number }[] = [];
+            for (let i = 0; i <= steps; i++) {
+              const a = startA + (diff * i) / steps;
+              route.push({ x: Math.cos(a) * ringR, z: Math.sin(a) * ringR });
+            }
+            lobbyWaypoints.set(p.id, route);
+          }
 
           scene!.add(stool);
           scene!.add(rig.root);
@@ -1591,6 +1919,7 @@ export function initThreeScene(): SceneController {
         entry.stool.rotation.y = -angle + Math.PI / 2;
         entry.rig.root.userData.isPassedOut = p.isPassedOut;
         entry.rig.setDoodles(p.faceDoodles || []);
+        entry.rig.setNameplateHidden(inLobby);
         const specialStatus = p.isCallingMaiAnh
           ? '📲 ĐANG GỌI NYC MAI ANH 💔'
           : p.isHeartbrokenMaiAnh
@@ -1614,8 +1943,78 @@ export function initThreeScene(): SceneController {
           scene?.remove(val.rig.root);
           scene?.remove(val.stool);
           playerRigs.delete(id);
+          lobbyWaypoints.delete(id);
+          lobbyReactions.delete(id);
         }
       });
+      refreshLobbyStools();
+    },
+
+    setLobbyMode: (mode: LobbyMode) => {
+      lobbyMode = mode;
+      if (mode !== 'off') ensureLobbyProps();
+      if (wardrobeSet) wardrobeSet.visible = mode !== 'off';
+      playerRigs.forEach(({ rig }) => rig.setNameplateHidden(mode !== 'off'));
+      refreshLobbyStools();
+    },
+
+    getLobbyAnchors: () => {
+      const anchors: LobbyAnchor[] = [];
+      if (!camera || !container) return anchors;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      const bySeat = new Map<number, { rig: CharacterRig; stool: THREE.Group; player: Player }>();
+      playerRigs.forEach((entry) => bySeat.set(entry.player.seatIndex, entry));
+      for (let i = 0; i < LOBBY_SEAT_COUNT; i++) {
+        const entry = bySeat.get(i);
+        let seated = false;
+        if (entry) {
+          const r = entry.rig.root.position;
+          _projVec.set(r.x, r.y + 1.4, r.z);
+          seated =
+            !lobbyWaypoints.has(entry.player.id) &&
+            Math.hypot(r.x - entry.stool.position.x, r.z - entry.stool.position.z) < 0.1;
+        } else {
+          const angle = lobbySeatAngle(i);
+          _projVec.set(Math.cos(angle) * LOBBY_TABLE_RADIUS, 0.85, Math.sin(angle) * LOBBY_TABLE_RADIUS);
+        }
+        _projVec.project(camera);
+        const onScreen =
+          _projVec.z < 1 && Math.abs(_projVec.x) <= 1.05 && Math.abs(_projVec.y) <= 1.05;
+        anchors.push({
+          seatIndex: i,
+          x: ((_projVec.x + 1) / 2) * w,
+          y: ((1 - _projVec.y) / 2) * h,
+          onScreen,
+          playerId: entry ? entry.player.id : null,
+          seated,
+        });
+      }
+      return anchors;
+    },
+
+    setGraphicsQuality: (quality: 'low' | 'high') => {
+      if (!renderer) return;
+      const low = quality === 'low' || isSoftwareGl;
+      renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = !low;
+      scene?.traverse((obj) => {
+        const mat = (obj as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        if (!mat) return;
+        (Array.isArray(mat) ? mat : [mat]).forEach((m) => (m.needsUpdate = true));
+      });
+    },
+
+    triggerLobbyReaction: (playerId: string, kind: LobbyReaction) => {
+      lobbyReactions.set(playerId, { kind, t: 0, dur: kind === 'munch' ? 1.4 : 0.9 });
+    },
+
+    set onLobbyCharacterClick(cb: ((playerId: string) => void) | undefined) {
+      onLobbyCharacterClickCb = cb;
+    },
+
+    set onLobbySeatClick(cb: ((seatIndex: number) => void) | undefined) {
+      onLobbySeatClickCb = cb;
     },
 
     updateFoodDishes: (dishes: FoodDish[]) => {

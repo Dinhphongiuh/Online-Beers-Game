@@ -43,7 +43,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       <div className="flex items-center gap-2 pointer-events-auto">
         <div className="bg-zinc-900/90 border border-amber-500/40 rounded-xl px-3 py-1.5 shadow-lg backdrop-blur-md flex items-center gap-2">
           <span className="text-xl">🍻</span>
-          <div>
+          <div className="hidden sm:block">
             <div className="text-xs font-black tracking-wide text-amber-400 flex items-center gap-1.5">
               TRẠM NHẬU ONLINE
               <span className="text-[10px] bg-red-600/80 text-white font-bold px-1.5 py-0.2 rounded">
@@ -139,6 +139,17 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
+      {/* Mobile: compact meters (the full gauges above are desktop-only) */}
+      <button
+        onClick={onOpenDrinkModal}
+        className="flex md:hidden items-center gap-1.5 whitespace-nowrap pointer-events-auto bg-zinc-900/90 border border-zinc-800 rounded-xl px-2 py-1.5 shadow-lg text-[11px] font-mono font-bold"
+        title="Độ Cồn • Tỉnh Táo • Bụng Bia"
+      >
+        <span className={alcohol > 70 ? 'text-red-400' : 'text-amber-400'}>🍺{alcohol}%</span>
+        <span className="text-cyan-300">⚡{stamina}%</span>
+        <span className={bladder >= 80 ? 'text-red-400 animate-pulse' : 'text-amber-300'}>💧{bladder}%</span>
+      </button>
+
       {/* Top Right: Currency & BGM Toggle */}
       <div className="flex items-center gap-2 pointer-events-auto">
         <button
@@ -146,7 +157,10 @@ export const TopBar: React.FC<TopBarProps> = ({
           className="bg-zinc-900/90 hover:bg-zinc-800 border border-amber-500/30 rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 shadow-lg"
         >
           <span className="text-xs">🪙</span>
-          <span className="text-xs font-bold text-amber-300">{userPlayer.coins} Nắp</span>
+          <span className="text-xs font-bold text-amber-300">
+            {userPlayer.coins}
+            <span className="hidden sm:inline"> Nắp</span>
+          </span>
         </button>
 
         <button
