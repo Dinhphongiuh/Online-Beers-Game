@@ -95,8 +95,9 @@ export function createStainlessTable(): THREE.Group {
   const topGeo = new THREE.CylinderGeometry(1.6, 1.6, 0.06, 48);
   const inoxMat = new THREE.MeshStandardMaterial({
     color: 0xd8d8d8,
-    metalness: 0.95,
-    roughness: 0.18,
+    metalness: 0.9,
+    // Brushed steel: the old mirror finish threw blinding highlights under the table spotlight
+    roughness: 0.34,
   });
   const topMesh = new THREE.Mesh(topGeo, inoxMat);
   topMesh.position.y = 0.95;
@@ -247,8 +248,9 @@ export function createBeerTower(levelRatio: number = 0.85): THREE.Group {
     color: 0xffffff,
     transparent: true,
     opacity: 0.35,
-    roughness: 0.1,
-    transmission: 0.6,
+    // Very glossy acrylic right under the table spotlight made a blinding specular stripe
+    roughness: 0.38,
+    transmission: 0, // transmission + bloom (HDR) produces NaN blowouts
     ior: 1.4,
     depthWrite: false,
   });
@@ -310,7 +312,7 @@ export function createBeerMug(glassType: string = 'beer_mug'): THREE.Group {
     transparent: true,
     opacity: 0.4,
     roughness: 0.15,
-    transmission: 0.5,
+    transmission: 0, // transmission + bloom (HDR) produces NaN blowouts
     ior: 1.5,
     depthWrite: false,
   });
@@ -488,185 +490,6 @@ export function createSpinningBottle(): THREE.Group {
 }
 
 // 7. Street Pub Dishes (Đĩa Mồi Đậu Phộng, Chân Gà, Lẩu Thái, Ốc Hương, Cá Viên, Xoài Non)
-export function createFoodPlatter(type: string): THREE.Group {
-  const dish = new THREE.Group();
-  dish.name = `FoodDish_${type}`;
-  const morsels: THREE.Object3D[] = [];
-
-  // Melamine plate (Đĩa phíp trắng viền xanh dương cổ điển)
-  const plateGeo = new THREE.CylinderGeometry(0.24, 0.19, 0.03, 28);
-  const plateMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25 });
-  const plate = new THREE.Mesh(plateGeo, plateMat);
-  plate.position.y = 0.015;
-  plate.receiveShadow = true;
-  dish.add(plate);
-
-  // Classic blue decorative rim
-  const rimGeo = new THREE.TorusGeometry(0.235, 0.008, 8, 32);
-  rimGeo.rotateX(Math.PI / 2);
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.3 });
-  const rim = new THREE.Mesh(rimGeo, rimMat);
-  rim.position.y = 0.031;
-  dish.add(rim);
-
-  // Banana leaf liner (Lá chuối xanh lót đĩa mồi)
-  if (type !== 'hotpot') {
-    const leafGeo = new THREE.CircleGeometry(0.18, 16);
-    leafGeo.rotateX(-Math.PI / 2);
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.65 });
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    leaf.position.y = 0.032;
-    dish.add(leaf);
-  }
-
-  // Red chili slices garnish (Ớt hiểm đỏ)
-  const chiliGeo = new THREE.ConeGeometry(0.012, 0.055, 8);
-  chiliGeo.rotateZ(Math.PI / 2.2);
-  const chiliMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.3 });
-
-  if (type === 'peanut') {
-    // Roasted peanuts with garlic & red chilies
-    const peanutGeo = new THREE.SphereGeometry(0.022, 10, 10);
-    peanutGeo.scale(1.45, 0.9, 0.95);
-    const peanutMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.75 });
-    const garlicMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.6 });
-
-    for (let i = 0; i < 12; i++) {
-      const mGroup = new THREE.Group();
-      const p1 = new THREE.Mesh(peanutGeo, peanutMat);
-      const p2 = new THREE.Mesh(peanutGeo, i % 3 === 0 ? garlicMat : peanutMat);
-      p2.position.set(0.02, 0.005, 0.015);
-      mGroup.add(p1, p2);
-
-      const r = (i / 12) * 0.14;
-      const th = i * 2.1;
-      mGroup.position.set(Math.cos(th) * r, 0.042 + (i % 3) * 0.008, Math.sin(th) * r);
-      mGroup.rotation.y = th;
-      dish.add(mGroup);
-      morsels.push(mGroup);
-    }
-    const chili = new THREE.Mesh(chiliGeo, chiliMat);
-    chili.position.set(0, 0.06, 0);
-    dish.add(chili);
-  } else if (type === 'chicken_feet') {
-    // Grilled honey-chili chicken feet + kumquat
-    const feetMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.35 });
-    const boneGeo = new THREE.CylinderGeometry(0.016, 0.02, 0.16, 10);
-    const toeGeo = new THREE.CylinderGeometry(0.008, 0.012, 0.07, 8);
-
-    for (let i = 0; i < 6; i++) {
-      const footGroup = new THREE.Group();
-      const shank = new THREE.Mesh(boneGeo, feetMat);
-      shank.rotation.z = Math.PI / 2;
-      footGroup.add(shank);
-
-      for (let t = -1; t <= 1; t++) {
-        const toe = new THREE.Mesh(toeGeo, feetMat);
-        toe.position.set(0.09, 0, t * 0.022);
-        toe.rotation.z = Math.PI / 2;
-        toe.rotation.y = t * 0.35;
-        footGroup.add(toe);
-      }
-
-      const angle = (i / 6) * Math.PI * 2;
-      footGroup.position.set(Math.cos(angle) * 0.06, 0.048 + (i % 2) * 0.012, Math.sin(angle) * 0.06);
-      footGroup.rotation.y = angle + 0.4;
-      dish.add(footGroup);
-      morsels.push(footGroup);
-    }
-  } else if (type === 'hotpot') {
-    // Stainless steel mini hotpot with shrimp, beef rolls, mushrooms
-    const potGeo = new THREE.CylinderGeometry(0.23, 0.18, 0.13, 28);
-    const potMat = new THREE.MeshStandardMaterial({ color: 0xa1a1aa, metalness: 0.85, roughness: 0.22 });
-    const pot = new THREE.Mesh(potGeo, potMat);
-    pot.position.y = 0.075;
-    dish.add(pot);
-
-    // Spicy Tomyum broth surface
-    const soupGeo = new THREE.CircleGeometry(0.21, 24);
-    soupGeo.rotateX(-Math.PI / 2);
-    const soupMat = new THREE.MeshStandardMaterial({
-      color: 0xea580c,
-      emissive: 0x9a3412,
-      emissiveIntensity: 0.25,
-      roughness: 0.15,
-    });
-    const soup = new THREE.Mesh(soupGeo, soupMat);
-    soup.position.y = 0.132;
-    dish.add(soup);
-
-    // Floating shrimp & meatball morsels inside hotpot
-    const shrimpGeo = new THREE.TorusGeometry(0.025, 0.01, 8, 16, Math.PI * 1.3);
-    shrimpGeo.rotateX(Math.PI / 2);
-    const shrimpMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.3 });
-    const mushroomMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.5 });
-
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const r = i < 6 ? 0.11 : 0.03;
-      const item = new THREE.Mesh(shrimpGeo, i % 2 === 0 ? shrimpMat : mushroomMat);
-      item.position.set(Math.cos(angle) * r, 0.138, Math.sin(angle) * r);
-      item.rotation.z = angle;
-      dish.add(item);
-      morsels.push(item);
-    }
-  } else if (type === 'oc_huong') {
-    // Ốc Hương Xào Bơ Tỏi (Spotted Babylon Snails in Garlic Butter)
-    const shellGeo = new THREE.ConeGeometry(0.028, 0.06, 12);
-    shellGeo.rotateX(Math.PI / 2.4);
-    const shellMat = new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.35 });
-    const spotMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.4 });
-
-    for (let i = 0; i < 8; i++) {
-      const snailGroup = new THREE.Group();
-      const shell = new THREE.Mesh(shellGeo, i % 2 === 0 ? shellMat : spotMat);
-      snailGroup.add(shell);
-      const angle = (i / 8) * Math.PI * 2;
-      const r = (i % 2 === 0 ? 0.09 : 0.045);
-      snailGroup.position.set(Math.cos(angle) * r, 0.048, Math.sin(angle) * r);
-      snailGroup.rotation.y = angle * 1.7;
-      dish.add(snailGroup);
-      morsels.push(snailGroup);
-    }
-  } else if (type === 'ca_vien') {
-    // Cá Viên Chiên Nước Mắm (Fried Fishball Skewers)
-    const ballGeo = new THREE.SphereGeometry(0.024, 12, 12);
-    const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 });
-    const pinkMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.45 });
-
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const r = i < 6 ? 0.095 : 0.03;
-      const ball = new THREE.Mesh(ballGeo, i % 2 === 0 ? goldMat : pinkMat);
-      ball.position.set(Math.cos(angle) * r, 0.05, Math.sin(angle) * r);
-      dish.add(ball);
-      morsels.push(ball);
-    }
-  } else if (type === 'xoai_non') {
-    // Xoài Non Chấm Mắm Ruốc (Crispy Green Mango Wedges + Shrimp Paste Bowl)
-    const wedgeGeo = new THREE.BoxGeometry(0.028, 0.018, 0.09);
-    const mangoMat = new THREE.MeshStandardMaterial({ color: 0xa3e635, roughness: 0.4 });
-
-    // Little dipping bowl in center
-    const dipBowlGeo = new THREE.CylinderGeometry(0.045, 0.035, 0.025, 16);
-    const dipMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.3 });
-    const dipBowl = new THREE.Mesh(dipBowlGeo, dipMat);
-    dipBowl.position.y = 0.042;
-    dish.add(dipBowl);
-
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const wedge = new THREE.Mesh(wedgeGeo, mangoMat);
-      wedge.position.set(Math.cos(angle) * 0.11, 0.044, Math.sin(angle) * 0.11);
-      wedge.rotation.y = -angle;
-      dish.add(wedge);
-      morsels.push(wedge);
-    }
-  }
-
-  dish.userData.morsels = morsels;
-  return dish;
-}
 
 // 7b. 3D Animated Chopsticks Pair (Đôi Đũa Tre Gắp Mồi)
 export function createChopsticksPair(): {
@@ -728,7 +551,7 @@ export function createFairyLights(): THREE.Group {
   const bulbMat = new THREE.MeshStandardMaterial({
     color: 0xfef08a,
     emissive: 0xfbbf24,
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 3.2,
     roughness: 0.2,
   });
 
@@ -798,7 +621,7 @@ export function createNeonSign(text: string, subtext: string, colorHex: number =
     map: texture,
     emissiveMap: texture,
     emissive: 0xffffff,
-    emissiveIntensity: 0.9,
+    emissiveIntensity: 1.9,
     roughness: 0.2,
   });
 
@@ -869,7 +692,7 @@ export function createStreetFoodCart(): THREE.Group {
     transparent: true,
     opacity: 0.4,
     roughness: 0.1,
-    transmission: 0.7,
+    transmission: 0, // transmission + bloom (HDR) produces NaN blowouts
     depthWrite: false,
   });
   const glassCase = new THREE.Mesh(caseGeo, caseMat);
@@ -931,7 +754,7 @@ export function createIceBucket(): THREE.Group {
     transparent: true,
     opacity: 0.82,
     roughness: 0.12,
-    transmission: 0.5,
+    transmission: 0, // transmission + bloom (HDR) produces NaN blowouts
   });
   const cubeGeo = new THREE.BoxGeometry(0.052, 0.052, 0.052);
   for (let i = 0; i < 9; i++) {

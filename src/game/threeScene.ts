@@ -6,7 +6,6 @@ import {
   createBeerTower,
   createCrocodileToy,
   createSpinningBottle,
-  createFoodPlatter,
   createChopsticksPair,
   createFairyLights,
   createSidewalkTexture,
@@ -29,6 +28,36 @@ import {
   createYellowPeePuddle,
 } from './proceduralModels';
 import { createChibiCharacter, CharacterRig, CheersAnimPhase } from './characterModel';
+import { createStreetBackdrop, StreetBackdrop } from './environment';
+import { createFoodPlatter, createTableClutter } from './foodModels';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+
+// Tames specular fireflies / NaNs before bloom, otherwise one hot pixel blooms into a white blob
+const HdrClampShader = {
+  uniforms: { tDiffuse: { value: null }, maxValue: { value: 3.0 } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float maxValue;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      if (any(isnan(c.rgb)) || any(isinf(c.rgb))) c.rgb = vec3(0.0);
+      c.rgb = min(c.rgb, vec3(maxValue));
+      gl_FragColor = c;
+    }
+  `,
+};
 import {
   Player,
   MinigameId,
@@ -130,13 +159,20 @@ const _yAxis = new THREE.Vector3(0, 1, 0);
 const TREE_POS = { x: -3.08, z: -2.7 };
 
 // Fixed positions on the round stainless steel table for each dish type
+// Dishes ring the 1.6m table at r≈0.92, leaving the back-left gap for the beer tower & ice
+// bucket and the centre free for minigame props
+const dishAt = (deg: number, r = 0.92): [number, number, number] => [
+  Math.cos((deg * Math.PI) / 180) * r,
+  0.98,
+  Math.sin((deg * Math.PI) / 180) * r,
+];
 const DISH_POSITIONS: Record<string, [number, number, number]> = {
-  peanut: [0.32, 0.98, -0.42],
-  chicken_feet: [-0.24, 0.98, 0.42],
-  hotpot: [0.46, 0.98, 0.18],
-  oc_huong: [-0.55, 0.98, 0.25],
-  ca_vien: [0.02, 0.98, -0.52],
-  xoai_non: [0.22, 0.98, 0.56],
+  hotpot: dishAt(-12, 0.86),
+  peanut: dishAt(35),
+  xoai_non: dishAt(80),
+  oc_huong: dishAt(125),
+  ca_vien: dishAt(-100),
+  chicken_feet: dishAt(-56),
 };
 
 const DISH_MORSEL_COLORS: Record<string, number> = {
@@ -242,6 +278,11 @@ export function initThreeScene(): SceneController {
   let onLobbyCharacterClickCb: ((playerId: string) => void) | undefined;
   let onLobbySeatClickCb: ((seatIndex: number) => void) | undefined;
   let onResizeHandler: (() => void) | null = null;
+  let streetBackdrop: StreetBackdrop | null = null;
+  // Bloom makes neon, lit windows and street lamps glow ("Đẹp" graphics only)
+  let composer: EffectComposer | null = null;
+  let bloomPass: UnrealBloomPass | null = null;
+  let bloomEnabled = true;
 
   // Mouse look (Pointer Lock): yaw orbits around the look target, pitch tilts it
   let pointerLocked = false;
@@ -316,8 +357,9 @@ export function initThreeScene(): SceneController {
   function setupScene() {
     scene = new THREE.Scene();
     (window as unknown as { __threeScene: THREE.Scene }).__threeScene = scene;
-    scene.background = new THREE.Color(0x0c0a09);
-    scene.fog = new THREE.FogExp2(0x0c0a09, 0.025);
+    // Night-time city haze; the sky dome in the street backdrop covers the background
+    scene.background = new THREE.Color(0x140f24);
+    scene.fog = new THREE.FogExp2(0x1a1330, 0.02);
 
     // Over-the-Shoulder / Isometric 35°-45° party table perspective
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 50);
@@ -330,8 +372,12 @@ export function initThreeScene(): SceneController {
     mouse = new THREE.Vector2();
 
     // Balanced 3-Point Lighting Rig
-    const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x18181b, 0.6);
+    const hemiLight = new THREE.HemisphereLight(0x818cf8, 0x1c1917, 0.55);
     scene.add(hemiLight);
+
+    // Saigon street around the pub: shophouses, sky, road, electric poles, street lamps
+    streetBackdrop = createStreetBackdrop();
+    scene.add(streetBackdrop.group);
 
     const keyLight = new THREE.DirectionalLight(0xfef08a, 1.8);
     keyLight.position.set(3, 6, 4);
@@ -351,7 +397,7 @@ export function initThreeScene(): SceneController {
     scene.add(tableSpot);
 
     // Ground Floor: Pavement
-    const groundGeo = new THREE.PlaneGeometry(30, 30);
+    const groundGeo = new THREE.PlaneGeometry(60, 40);
     const groundMat = new THREE.MeshStandardMaterial({
       map: createSidewalkTexture(),
       roughness: 0.85,
@@ -412,6 +458,9 @@ export function initThreeScene(): SceneController {
     // Table in center
     tableGroup = createStainlessTable();
     scene.add(tableGroup);
+
+    // Bottles, cans, chopstick holder, sauces, napkins & peanut shells on the table
+    scene.add(createTableClutter());
 
     // Sidewalk Floor Litter (Peanut shells, crumpled tissues, bottle caps & rolling bottles)
     const floorLitter = createFloorLitterAndBottles();
@@ -1155,6 +1204,9 @@ export function initThreeScene(): SceneController {
 
     // Update Foam
     updateFoamParticles(delta);
+
+    // Hotpot flame, bubbles & steam
+    foodPlattersMap.forEach((platter) => platter.userData.update?.(time));
 
     // Animate Cậu Vàng Under-Table Dog (wagging tail + jumping for food)
     if (cauVangDog) {
@@ -1920,7 +1972,10 @@ export function initThreeScene(): SceneController {
 
     if (pointerLocked && lobbyMode === 'off') updateCrosshairAim();
 
-    renderer.render(scene, camera);
+    streetBackdrop?.update(time);
+
+    if (composer && bloomEnabled) composer.render(rawDelta);
+    else renderer.render(scene, camera);
 
     if (isSoftwareGl) {
       afterDraw(tick);
@@ -1983,11 +2038,28 @@ export function initThreeScene(): SceneController {
       scene!.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
       pmrem.dispose();
 
+      if (!isSoftwareGl) {
+        composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene!, camera!));
+        composer.addPass(new ShaderPass(HdrClampShader));
+        bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(mountDiv.clientWidth / 2, mountDiv.clientHeight / 2),
+          1.6, // strength
+          0.35, // radius
+          // Lit surfaces under the table spotlight reach ~2.5; emissives get clamped to 3.0,
+          // so only neon, bulbs, signs and lamps cross this threshold
+          2.92
+        );
+        composer.addPass(bloomPass);
+        composer.addPass(new OutputPass());
+      }
+
       const onResize = () => {
         if (!container || !camera || !renderer) return;
         camera.aspect = container.clientWidth / container.clientHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
+        composer?.setSize(container.clientWidth, container.clientHeight);
       };
       onResizeHandler = onResize;
       window.addEventListener('resize', onResize);
@@ -2020,6 +2092,8 @@ export function initThreeScene(): SceneController {
       if (pointerLocked) document.exitPointerLock();
       if (onResizeHandler) window.removeEventListener('resize', onResizeHandler);
       onResizeHandler = null;
+      composer?.dispose();
+      composer = null;
       renderer?.domElement.remove();
       renderer?.forceContextLoss();
       renderer?.dispose();
@@ -2129,7 +2203,7 @@ export function initThreeScene(): SceneController {
     setLobbyMode: (mode: LobbyMode) => {
       lobbyMode = mode;
       if (mode !== 'off') ensureLobbyProps();
-      if (wardrobeSet) wardrobeSet.visible = mode !== 'off';
+      if (wardrobeSet) wardrobeSet.visible = mode === 'wardrobe';
       playerRigs.forEach(({ rig }) => rig.setNameplateHidden(mode !== 'off'));
       refreshLobbyStools();
     },
@@ -2184,6 +2258,11 @@ export function initThreeScene(): SceneController {
       const low = quality === 'low' || isSoftwareGl;
       renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 2));
       renderer.shadowMap.enabled = !low;
+      bloomEnabled = !low;
+      if (composer && container) {
+        composer.setPixelRatio(renderer.getPixelRatio());
+        composer.setSize(container.clientWidth, container.clientHeight);
+      }
       scene?.traverse((obj) => {
         const mat = (obj as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
         if (!mat) return;
