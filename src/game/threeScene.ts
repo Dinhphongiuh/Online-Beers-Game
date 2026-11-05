@@ -84,6 +84,12 @@ export interface SceneController {
   triggerLobbyReaction: (playerId: string, kind: LobbyReaction) => void;
   onLobbyCharacterClick?: (playerId: string) => void;
   onLobbySeatClick?: (seatIndex: number) => void;
+  // ---- In-match mouse look (Pointer Lock) ----
+  /** Fired when the cursor gets locked to the 3D view (click) or released (Esc / UI). */
+  onPointerLockChange?: (locked: boolean, unavailable?: boolean) => void;
+  releasePointerLock: () => void;
+  /** Horizontal camera rotation from mouse look, so WASD can move relative to the view. */
+  getCameraYaw: () => number;
   /** 'low' drops pixel ratio to 1 and disables shadows for weak devices. */
   setGraphicsQuality: (quality: 'low' | 'high') => void;
 }
@@ -118,6 +124,10 @@ const _midPos = new THREE.Vector3();
 const _camTargetPos = new THREE.Vector3();
 const _camLookAt = new THREE.Vector3();
 const _currentLookAt = new THREE.Vector3(0, 0.92, -0.15);
+const _yAxis = new THREE.Vector3(0, 1, 0);
+
+// Sidewalk tree (Khoa Nguyễn climbs it at 80% alcohol)
+const TREE_POS = { x: -3.08, z: -2.7 };
 
 // Fixed positions on the round stainless steel table for each dish type
 const DISH_POSITIONS: Record<string, [number, number, number]> = {
@@ -232,6 +242,22 @@ export function initThreeScene(): SceneController {
   let onLobbyCharacterClickCb: ((playerId: string) => void) | undefined;
   let onLobbySeatClickCb: ((seatIndex: number) => void) | undefined;
   let onResizeHandler: (() => void) | null = null;
+
+  // Mouse look (Pointer Lock): yaw orbits around the look target, pitch tilts it
+  let pointerLocked = false;
+  let camYaw = 0;
+  let camPitch = 0;
+  let lastLookCamMode = '';
+  let lastSentAimX = 0;
+  let lastSentAimY = 0;
+  let onPointerLockChangeCb: ((locked: boolean, unavailable?: boolean) => void) | undefined;
+  let pointerLockUnavailable = false;
+  let dragLook: { id: number; x: number; y: number; moved: number } | null = null;
+  const MOUSE_LOOK_SENSITIVITY = 0.0032;
+  const _center = new THREE.Vector2(0, 0);
+  const _tablePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.98);
+  const _aimHit = new THREE.Vector3();
+  const _lookOffset = new THREE.Vector3();
 
   // Player rigs mapped by player id
   const playerRigs = new Map<string, { rig: CharacterRig; stool: THREE.Group; player: Player }>();
@@ -412,15 +438,17 @@ export function initThreeScene(): SceneController {
     scene.add(karaokeSpeaker.group);
 
     // Lush Sidewalk Green Tree ("Cây Bàng Xanh Bờ Kè Cho Khoa Nguyễn Leo Cây Khi Đủ 80% Cồn")
-    // Placed on the sidewalk behind-left of Khoa Nguyễn (-1.20, 0, -2.98): far from the table/stools, yet 100% visible in center-left camera view!
+    // Left of the neon sign (which spans x -2.1..2.1) so the canopy never hides the shop name,
+    // still inside the seated camera's view for Khoa Nguyễn's tree climb.
     sidewalkGreenTree = createSidewalkGreenTree();
-    sidewalkGreenTree.group.position.set(-1.2, 0, -2.98);
+    sidewalkGreenTree.group.position.set(TREE_POS.x, 0, TREE_POS.z);
     sidewalkGreenTree.group.userData = { isGreenTree: true };
     scene.add(sidewalkGreenTree.group);
 
     // Open-Air Charcoal Grill Kitchen ("Khu Vực Bếp Lộ Thiên - Nướng Mực & Hàu Mỡ Hành + Dao Phay")
     openKitchen = createOpenCharcoalKitchen();
-    openKitchen.group.position.set(2.25, 0, -2.75);
+    // Shifted right so the grill no longer covers the sign's lower-right corner
+    openKitchen.group.position.set(3.0, 0, -2.75);
     openKitchen.group.rotation.y = -0.32;
     openKitchen.group.userData = { isOpenKitchen: true };
     scene.add(openKitchen.group);
@@ -515,7 +543,8 @@ export function initThreeScene(): SceneController {
 
     // 1-Stall Sidewalk WC Booth in back-left corner (Nhà Vệ Sinh 1 Buồng)
     toiletBooth = createToiletBooth();
-    toiletBooth.group.position.set(-3.45, 0, -2.55);
+    // Pushed further left to make room for the tree beside the sign
+    toiletBooth.group.position.set(-4.78, 0, -2.4);
     toiletBooth.group.rotation.y = 0.45;
     toiletBooth.group.userData = { isToiletBooth: true };
     scene.add(toiletBooth.group);
@@ -681,21 +710,100 @@ export function initThreeScene(): SceneController {
     }
   }
 
+  function onPointerLockStateChange() {
+    const locked = !!container && document.pointerLockElement === container;
+    if (locked === pointerLocked) return;
+    pointerLocked = locked;
+    onPointerLockChangeCb?.(locked);
+  }
+
+  function onMouseLook(event: MouseEvent) {
+    if (!pointerLocked) return;
+    camYaw -= event.movementX * MOUSE_LOOK_SENSITIVITY;
+    camPitch = THREE.MathUtils.clamp(
+      camPitch + event.movementY * MOUSE_LOOK_SENSITIVITY,
+      -1.2,
+      1.2
+    );
+  }
+
   function onPointerMove(event: PointerEvent) {
-    if (!container) return;
+    if (!container || pointerLocked) return;
     const rect = container.getBoundingClientRect();
     const x = Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1));
     const y = Math.max(-1, Math.min(1, -((event.clientY - rect.top) / rect.height) * 2 + 1));
     onPointerAimChangeCb?.(x, y);
   }
 
-  function onPointerDown(event: MouseEvent) {
+  function onPointerDown(event: PointerEvent) {
     if (!container || !camera || !scene || !raycaster) return;
-    const rect = container.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    mouse?.set(x, y);
 
+    if (pointerLocked) {
+      // Locked: interact with whatever sits under the center crosshair
+      pickAt(0, 0);
+      return;
+    }
+
+    if (lobbyMode === 'off') {
+      // In a match, the first left click locks the cursor for mouse look (desktop mice)
+      const canLock =
+        event.pointerType === 'mouse' && !pointerLockUnavailable && !!container.requestPointerLock;
+      if (canLock && event.button === 0) {
+        try {
+          const req = container.requestPointerLock() as unknown as Promise<void> | undefined;
+          req?.catch?.(() => markPointerLockUnavailable());
+        } catch {
+          markPointerLockUnavailable();
+        }
+        return;
+      }
+      // Fallback (touch, or pointer lock blocked e.g. inside an iframe): drag to look,
+      // a click without dragging still interacts with the scene on pointer up
+      if (!canLock && event.button === 0) {
+        dragLook = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0 };
+        return;
+      }
+    }
+
+    const rect = container.getBoundingClientRect();
+    pickAt(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+  }
+
+  function markPointerLockUnavailable() {
+    if (pointerLockUnavailable) return;
+    pointerLockUnavailable = true;
+    onPointerLockChangeCb?.(false, true);
+  }
+
+  function onDragLookMove(event: PointerEvent) {
+    if (!dragLook || event.pointerId !== dragLook.id) return;
+    const dx = event.clientX - dragLook.x;
+    const dy = event.clientY - dragLook.y;
+    dragLook.x = event.clientX;
+    dragLook.y = event.clientY;
+    dragLook.moved += Math.abs(dx) + Math.abs(dy);
+    camYaw -= dx * MOUSE_LOOK_SENSITIVITY * 1.4;
+    camPitch = THREE.MathUtils.clamp(camPitch + dy * MOUSE_LOOK_SENSITIVITY * 1.4, -1.2, 1.2);
+  }
+
+  function onDragLookEnd(event: PointerEvent) {
+    if (!dragLook || event.pointerId !== dragLook.id || !container) return;
+    const wasClick = dragLook.moved < 6;
+    dragLook = null;
+    if (!wasClick) return;
+    const rect = container.getBoundingClientRect();
+    pickAt(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+  }
+
+  function pickAt(ndcX: number, ndcY: number) {
+    if (!camera || !scene || !raycaster) return;
+    mouse?.set(ndcX, ndcY);
     raycaster.setFromCamera(mouse!, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
 
@@ -994,6 +1102,43 @@ export function initThreeScene(): SceneController {
         }
       }
     }
+  }
+
+  /**
+   * Rotates the current camera framing by the mouse-look yaw/pitch.
+   * Third-person modes orbit the camera around its look target; first-person turns the head.
+   */
+  function applyMouseLook(firstPerson: boolean) {
+    const pivot = firstPerson ? _camTargetPos : _camLookAt;
+    const moving = firstPerson ? _camLookAt : _camTargetPos;
+    _lookOffset.subVectors(moving, pivot);
+    _lookOffset.applyAxisAngle(_yAxis, camYaw);
+
+    const len = _lookOffset.length();
+    const horiz = Math.hypot(_lookOffset.x, _lookOffset.z) || 0.0001;
+    let elevation = Math.atan2(_lookOffset.y, horiz);
+    // pitch > 0 = look further down in both modes
+    elevation = firstPerson
+      ? THREE.MathUtils.clamp(elevation - camPitch, -1.25, 0.9)
+      : THREE.MathUtils.clamp(elevation + camPitch, 0.06, 1.45);
+    const newHoriz = Math.cos(elevation) * len;
+    _lookOffset.x *= newHoriz / horiz;
+    _lookOffset.z *= newHoriz / horiz;
+    _lookOffset.y = Math.sin(elevation) * len;
+    moving.addVectors(pivot, _lookOffset);
+  }
+
+  /** While locked, the IK hand reaches for the spot on the table under the crosshair. */
+  function updateCrosshairAim() {
+    if (!camera || !raycaster) return;
+    raycaster.setFromCamera(_center, camera);
+    if (!raycaster.ray.intersectPlane(_tablePlane, _aimHit)) return;
+    const aimX = THREE.MathUtils.clamp(_aimHit.x / 0.85, -1, 1);
+    const aimY = THREE.MathUtils.clamp((0.45 - _aimHit.z) / 0.75, -1, 1);
+    if (Math.abs(aimX - lastSentAimX) < 0.03 && Math.abs(aimY - lastSentAimY) < 0.03) return;
+    lastSentAimX = aimX;
+    lastSentAimY = aimY;
+    onPointerAimChangeCb?.(aimX, aimY);
   }
 
   function tick() {
@@ -1461,8 +1606,8 @@ export function initThreeScene(): SceneController {
 
       // If Khoa Nguyễn (Gấu Nâu >= 80% alcohol) walks out from his stool to climb the Sidewalk Green Tree!
       if (player.isClimbingTree) {
-        const treeClimbTargetX = -1.12;
-        const treeClimbTargetZ = -2.72;
+        const treeClimbTargetX = TREE_POS.x + 0.08;
+        const treeClimbTargetZ = TREE_POS.z + 0.26;
         const dx = treeClimbTargetX - rig.root.position.x;
         const dz = treeClimbTargetZ - rig.root.position.z;
         const distToTrunk = Math.hypot(dx, dz);
@@ -1706,13 +1851,14 @@ export function initThreeScene(): SceneController {
     } else if (activeCamMode === 'first_person') {
       // A2. First-Person POV (Tab / V): Eye level from user seat looking across table or down at dice cup
       _camTargetPos.set(
-        currentIKState.aimX * 0.14 + swayX * 0.8,
+        currentIKState.aimX * 0.14 * (pointerLocked ? 0 : 1) + swayX * 0.8,
         1.34 + swayY * 0.8,
         1.48
       );
+      const fpAim = pointerLocked ? 0 : 1;
       _camLookAt.set(
-        currentIKState.aimX * 1.25 + swayX,
-        0.95 + currentIKState.aimY * 0.55 + swayY,
+        currentIKState.aimX * 1.25 * fpAim + swayX,
+        0.95 + currentIKState.aimY * 0.55 * fpAim + swayY,
         -1.2
       );
       camera.fov = THREE.MathUtils.damp(camera.fov, 50, 6, rawDelta);
@@ -1739,23 +1885,40 @@ export function initThreeScene(): SceneController {
         if (player.isClimbingTree) someoneClimbingTree = true;
       });
       _camTargetPos.set(0.58 + swayX, 2.55 + swayY, 3.65);
+      const seatAim = pointerLocked ? 0 : 1;
       _camLookAt.set(
-        (someoneClimbingTree ? -0.25 : 0) + currentIKState.aimX * 0.22,
-        (someoneClimbingTree ? 1.08 : 0.92) + currentIKState.aimY * 0.1,
-        someoneClimbingTree ? -0.55 : -0.15
+        (someoneClimbingTree ? -0.9 : 0) + currentIKState.aimX * 0.22 * seatAim,
+        (someoneClimbingTree ? 1.08 : 0.92) + currentIKState.aimY * 0.1 * seatAim,
+        someoneClimbingTree ? -0.6 : -0.15
       );
       camera.fov = THREE.MathUtils.damp(camera.fov, 45, 6, rawDelta);
       camera.updateProjectionMatrix();
     }
 
-    camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, 5, rawDelta);
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, 5, rawDelta);
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, 5, rawDelta);
+    // Mouse look: reset when the camera mode changes, then rotate the mode's framing
+    if (lobbyMode === 'off') {
+      if (activeCamMode !== lastLookCamMode) {
+        lastLookCamMode = activeCamMode;
+        camYaw = 0;
+        camPitch = 0;
+      }
+      if (slowMoTimer <= 0 && (camYaw !== 0 || camPitch !== 0)) {
+        applyMouseLook(activeCamMode === 'first_person');
+      }
+    }
 
-    _currentLookAt.x = THREE.MathUtils.damp(_currentLookAt.x, _camLookAt.x, 6, rawDelta);
-    _currentLookAt.y = THREE.MathUtils.damp(_currentLookAt.y, _camLookAt.y, 6, rawDelta);
-    _currentLookAt.z = THREE.MathUtils.damp(_currentLookAt.z, _camLookAt.z, 6, rawDelta);
+    const posRate = pointerLocked ? 14 : 5;
+    const lookRate = pointerLocked ? 16 : 6;
+    camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, posRate, rawDelta);
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, posRate, rawDelta);
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, posRate, rawDelta);
+
+    _currentLookAt.x = THREE.MathUtils.damp(_currentLookAt.x, _camLookAt.x, lookRate, rawDelta);
+    _currentLookAt.y = THREE.MathUtils.damp(_currentLookAt.y, _camLookAt.y, lookRate, rawDelta);
+    _currentLookAt.z = THREE.MathUtils.damp(_currentLookAt.z, _camLookAt.z, lookRate, rawDelta);
     camera.lookAt(_currentLookAt);
+
+    if (pointerLocked && lobbyMode === 'off') updateCrosshairAim();
 
     renderer.render(scene, camera);
 
@@ -1830,6 +1993,12 @@ export function initThreeScene(): SceneController {
       window.addEventListener('resize', onResize);
       container.addEventListener('pointerdown', onPointerDown);
       container.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerlockchange', onPointerLockStateChange);
+      document.addEventListener('pointerlockerror', markPointerLockUnavailable);
+      window.addEventListener('pointermove', onDragLookMove);
+      window.addEventListener('pointerup', onDragLookEnd);
+      window.addEventListener('pointercancel', onDragLookEnd);
+      document.addEventListener('mousemove', onMouseLook);
 
       tick();
     },
@@ -1842,6 +2011,13 @@ export function initThreeScene(): SceneController {
       }
       container?.removeEventListener('pointerdown', onPointerDown);
       container?.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerlockchange', onPointerLockStateChange);
+      document.removeEventListener('pointerlockerror', markPointerLockUnavailable);
+      window.removeEventListener('pointermove', onDragLookMove);
+      window.removeEventListener('pointerup', onDragLookEnd);
+      window.removeEventListener('pointercancel', onDragLookEnd);
+      document.removeEventListener('mousemove', onMouseLook);
+      if (pointerLocked) document.exitPointerLock();
       if (onResizeHandler) window.removeEventListener('resize', onResizeHandler);
       onResizeHandler = null;
       renderer?.domElement.remove();
@@ -1992,6 +2168,16 @@ export function initThreeScene(): SceneController {
       }
       return anchors;
     },
+
+    set onPointerLockChange(cb: ((locked: boolean, unavailable?: boolean) => void) | undefined) {
+      onPointerLockChangeCb = cb;
+    },
+
+    releasePointerLock: () => {
+      if (pointerLocked) document.exitPointerLock();
+    },
+
+    getCameraYaw: () => camYaw,
 
     setGraphicsQuality: (quality: 'low' | 'high') => {
       if (!renderer) return;

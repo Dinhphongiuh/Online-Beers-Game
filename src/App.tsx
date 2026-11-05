@@ -395,6 +395,9 @@ export default function App({
   const [truthDareTarget, setTruthDareTarget] = useState<Player | null>(null);
   const [isBgmActive, setIsBgmActive] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
+  const [isPointerLocked, setIsPointerLocked] = useState(false);
+  // Some embeds (iframes/webviews) forbid pointer lock: fall back to drag-to-look
+  const [isDragLookFallback, setIsDragLookFallback] = useState(false);
 
   const userPlayer = tableState.players.find((p) => p.isUser) || tableState.players[0];
 
@@ -416,6 +419,12 @@ export default function App({
     scene.setGraphicsQuality(graphics);
     scene.updatePlayers(tableState.players);
     scene.updateFoodDishes(tableState.foodDishes);
+
+    // Mouse look: click the 3D view to lock the cursor, Esc to release
+    scene.onPointerLockChange = (locked: boolean, unavailable?: boolean) => {
+      setIsPointerLocked(locked);
+      if (unavailable) setIsDragLookFallback(true);
+    };
 
     // Callbacks from 3D raycasting & mouse IK pointer
     scene.onPointerAimChange = (aimX: number, aimY: number) => {
@@ -1254,9 +1263,10 @@ export default function App({
         label: '🔥 Khu Bếp Lộ Thiên (Bếp than hồng nướng mực & hàu mỡ hành)',
       },
       restroom_alley: {
-        x: 3.1,
-        z: -2.2,
-        angle: 0.4,
+        // In front of the WC booth (moved left of the neon sign)
+        x: -3.35,
+        z: -1.35,
+        angle: -2.3,
         label: '🚽 Khu Vệ Sinh & Góc Tối (Giải quyết bụng bia, trốn bill, móc túi)',
       },
       convenience_atm: {
@@ -1472,7 +1482,7 @@ export default function App({
       controlMode: 'free_roam',
       cameraMode: 'free_roam',
       activeZone: 'restroom_alley',
-      freeRoamPos: { x: 3.1, z: -2.2, angle: 0.4, isMoving: false },
+      freeRoamPos: { x: -3.35, z: -1.35, angle: -2.3, isMoving: false },
     }));
 
     if (action === 'dodge_bill') {
@@ -2075,9 +2085,20 @@ export default function App({
     setIkState((prev) => ({ ...prev, emote }));
   };
 
+  // Hand the cursor back whenever a modal or minigame UI needs clicking
+  useEffect(() => {
+    if (activeModal !== 'none' || tableState.activeMinigame !== 'none') {
+      sceneRef.current?.releasePointerLock();
+    }
+  }, [activeModal, tableState.activeMinigame]);
+
   // Global Keyboard & Mouse Controls Listener
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Chat input [Enter] and quick-chat wheel [Q] need the cursor
+      if (e.key === 'Enter' || e.key === 'q' || e.key === 'Q') {
+        sceneRef.current?.releasePointerLock();
+      }
       if (activeModal !== 'none') return;
 
       if (e.key === 'Tab' || e.key === 'v' || e.key === 'V') {
@@ -2147,8 +2168,12 @@ export default function App({
             }
 
             const step = 0.22;
-            const dx = key === 'a' ? -step : key === 'd' ? step : 0;
-            const dz = key === 'w' ? -step : key === 's' ? step : 0;
+            const localX = key === 'a' ? -step : key === 'd' ? step : 0;
+            const localZ = key === 'w' ? -step : key === 's' ? step : 0;
+            // W walks where the camera faces once mouse look has turned it
+            const yaw = sceneRef.current?.getCameraYaw() ?? 0;
+            const dx = localX * Math.cos(yaw) + localZ * Math.sin(yaw);
+            const dz = -localX * Math.sin(yaw) + localZ * Math.cos(yaw);
             const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
             const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
             const angle = Math.atan2(dx, dz);
@@ -3905,7 +3930,39 @@ export default function App({
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-zinc-950 font-sans">
       {/* 3D WebGL Canvas Container */}
-      <div ref={canvasMountRef} className="absolute inset-0 w-full h-full z-0 cursor-grab active:cursor-grabbing" />
+      <div
+        ref={canvasMountRef}
+        className={`absolute inset-0 w-full h-full z-0 touch-none ${
+          isPointerLocked ? 'cursor-none' : isDragLookFallback ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
+        }`}
+      />
+
+      {/* Mouse-look crosshair & lock hint (desktop mice only) */}
+      {isPointerLocked ? (
+        <>
+          <div className="pointer-events-none fixed left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+            <div className="relative w-6 h-6">
+              <div className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 rounded bg-white/90 shadow" />
+              <div className="absolute left-1/2 bottom-0 h-2 w-0.5 -translate-x-1/2 rounded bg-white/90 shadow" />
+              <div className="absolute top-1/2 left-0 w-2 h-0.5 -translate-y-1/2 rounded bg-white/90 shadow" />
+              <div className="absolute top-1/2 right-0 w-2 h-0.5 -translate-y-1/2 rounded bg-white/90 shadow" />
+              <div className="absolute left-1/2 top-1/2 w-1 h-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400" />
+            </div>
+          </div>
+          <div className="pointer-events-none fixed left-1/2 bottom-28 z-10 -translate-x-1/2 px-3 py-1 rounded-full bg-black/55 text-[11px] font-bold text-white/85">
+            🖱️ Rê chuột xoay góc nhìn • Click tương tác ở tâm ngắm • <b className="text-amber-300">Esc</b> hiện chuột
+          </div>
+        </>
+      ) : (
+        activeModal === 'none' &&
+        tableState.activeMinigame === 'none' && (
+          <div className="pointer-events-none fixed left-1/2 bottom-28 z-10 -translate-x-1/2 hidden pointer-fine:block px-3 py-1 rounded-full bg-black/55 text-[11px] font-bold text-white/85 animate-pulse">
+            {isDragLookFallback
+              ? '🖱️ Giữ & kéo chuột để xoay góc nhìn (trình duyệt này không cho khóa chuột)'
+              : '🖱️ Click vào màn hình để khóa chuột & xoay góc nhìn'}
+          </div>
+        )
+      )}
 
       {/* Top HUD */}
       <TopBar
