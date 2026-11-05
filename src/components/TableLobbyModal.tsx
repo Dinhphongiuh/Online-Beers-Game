@@ -4,8 +4,8 @@ import { sound } from '../game/audio';
 import { Users, Plus, Trash2, MapPin, Copy, Check, Database, Zap, RefreshCw, Trophy, Server } from 'lucide-react';
 
 interface BackendStatus {
-  mongodb: { connected: boolean; provider: string; error?: string };
-  redis: { connected: boolean; provider: string; error?: string };
+  mongodb: { configured: boolean; connected: boolean; error?: string };
+  redis: { configured: boolean; connected: boolean; error?: string };
 }
 
 interface TableLobbyModalProps {
@@ -105,10 +105,11 @@ export const TableLobbyModal: React.FC<TableLobbyModalProps> = ({
       if (res.ok) {
         setSyncMessage('Đã đồng bộ lên MongoDB + Redis Cache!');
       } else {
-        setSyncMessage('Đã lưu vào bộ nhớ dự phòng Backend!');
+        const data = await res.json().catch(() => ({}));
+        setSyncMessage(`❌ Đồng bộ thất bại: ${data.error || `HTTP ${res.status}`}`);
       }
     } catch (err) {
-      setSyncMessage('Đã đồng bộ trạng thái bàn nhậu!');
+      setSyncMessage('❌ Không kết nối được máy chủ — chưa đồng bộ.');
     } finally {
       setIsSyncing(false);
       setTimeout(() => setSyncMessage(null), 3000);
@@ -164,13 +165,17 @@ export const TableLobbyModal: React.FC<TableLobbyModalProps> = ({
               <div>
                 <div className="text-[10px] text-zinc-400 font-bold leading-tight">MongoDB Backend</div>
                 <div className="text-[11px] font-semibold text-emerald-300">
-                  {backendStatus?.mongodb.connected ? 'Cluster Kết Nối' : 'In-Memory Store'}
+                  {backendStatus?.mongodb.connected
+                    ? 'Đã kết nối'
+                    : backendStatus?.mongodb.configured === false
+                    ? 'Chưa cấu hình'
+                    : 'Mất kết nối'}
                 </div>
               </div>
             </div>
             <span
               className={`w-2 h-2 rounded-full ${
-                backendStatus?.mongodb.connected ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'
+                backendStatus?.mongodb.connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'
               }`}
             />
           </div>
@@ -181,13 +186,17 @@ export const TableLobbyModal: React.FC<TableLobbyModalProps> = ({
               <div>
                 <div className="text-[10px] text-zinc-400 font-bold leading-tight">Redis Cache & TTL</div>
                 <div className="text-[11px] font-semibold text-amber-300">
-                  {backendStatus?.redis.connected ? 'Cluster Kết Nối' : 'In-Memory Cache'}
+                  {backendStatus?.redis.connected
+                    ? 'Đã kết nối'
+                    : backendStatus?.redis.configured === false
+                    ? 'Chưa cấu hình'
+                    : 'Mất kết nối'}
                 </div>
               </div>
             </div>
             <span
               className={`w-2 h-2 rounded-full ${
-                backendStatus?.redis.connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                backendStatus?.redis.connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'
               }`}
             />
           </div>

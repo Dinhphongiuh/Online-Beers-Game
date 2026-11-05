@@ -1,292 +1,166 @@
-import Redis from 'ioredis';
+import IORedis from 'ioredis';
+import { Redis as UpstashRedis } from '@upstash/redis';
+import { BackendUnavailableError } from './errors.ts';
 
-// In-Memory Fallback Store (implements Redis-like interface with TTL)
-interface CacheEntry {
-  value: string;
-  expireAt?: number;
+// Redis is required: there is no in-memory fallback. Two ways to configure it:
+//   • TCP:  REDIS_URL=redis://… or rediss://…  (ioredis, persistent connection)
+//   • REST: UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN  (Upstash HTTP API)
+// While unconfigured or unreachable, every command throws BackendUnavailableError (HTTP 503).
+
+export interface RedisStatus {
+  configured: boolean;
+  connected: boolean;
+  mode?: 'tcp' | 'rest';
+  error?: string;
 }
 
-class InMemoryRedis {
-  private store = new Map<string, CacheEntry>();
-  private hashStore = new Map<string, Map<string, string>>();
-
-  private cleanIfExpired(key: string): boolean {
-    const entry = this.store.get(key);
-    if (!entry) return true;
-    if (entry.expireAt && Date.now() > entry.expireAt) {
-      this.store.delete(key);
-      return true;
-    }
-    return false;
-  }
-
-  async get(key: string): Promise<string | null> {
-    if (this.cleanIfExpired(key)) return null;
-    return this.store.get(key)?.value ?? null;
-  }
-
-  async set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'> {
-    let expireAt: number | undefined;
-    if (mode === 'EX' && duration) {
-      expireAt = Date.now() + duration * 1000;
-    } else if (mode === 'PX' && duration) {
-      expireAt = Date.now() + duration;
-    }
-    this.store.set(key, { value, expireAt });
-    return 'OK';
-  }
-
-  async del(...keys: string[]): Promise<number> {
-    let count = 0;
-    for (const k of keys) {
-      if (this.store.delete(k)) count++;
-      if (this.hashStore.delete(k)) count++;
-    }
-    return count;
-  }
-
-  async incr(key: string): Promise<number> {
-    const current = await this.get(key);
-    const nextVal = (Number(current) || 0) + 1;
-    await this.set(key, String(nextVal));
-    return nextVal;
-  }
-
-  async expire(key: string, seconds: number): Promise<number> {
-    const entry = this.store.get(key);
-    if (!entry) return 0;
-    entry.expireAt = Date.now() + seconds * 1000;
-    return 1;
-  }
-
-  async hset(key: string, field: string, value: string): Promise<number> {
-    let map = this.hashStore.get(key);
-    if (!map) {
-      map = new Map();
-      this.hashStore.set(key, map);
-    }
-    const isNew = !map.has(field);
-    map.set(field, value);
-    return isNew ? 1 : 0;
-  }
-
-  async hget(key: string, field: string): Promise<string | null> {
-    return this.hashStore.get(key)?.get(field) ?? null;
-  }
-
-  async hgetall(key: string): Promise<Record<string, string>> {
-    const map = this.hashStore.get(key);
-    if (!map) return {};
-    const obj: Record<string, string> = {};
-    for (const [k, v] of map.entries()) {
-      obj[k] = v;
-    }
-    return obj;
-  }
-
-  async keys(pattern: string): Promise<string[]> {
-    const now = Date.now();
-    const result: string[] = [];
-    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-    for (const [key, entry] of this.store.entries()) {
-      if (entry.expireAt && now > entry.expireAt) {
-        this.store.delete(key);
-        continue;
-      }
-      if (regex.test(key)) {
-        result.push(key);
-      }
-    }
-    return result;
-  }
-
-  async ping(): Promise<'PONG'> {
-    return 'PONG';
-  }
-}
-
-// Redis Client Manager
-export interface RedisService {
+interface RedisDriver {
+  mode: 'tcp' | 'rest';
+  isReady(): boolean;
   get(key: string): Promise<string | null>;
-  set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'>;
+  set(key: string, value: string, exSeconds?: number): Promise<unknown>;
   del(...keys: string[]): Promise<number>;
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
-  hset(key: string, field: string, value: string): Promise<number>;
-  hget(key: string, field: string): Promise<string | null>;
-  hgetall(key: string): Promise<Record<string, string>>;
   keys(pattern: string): Promise<string[]>;
-  ping(): Promise<string>;
-  getStatus(): { connected: boolean; provider: 'ioredis' | 'in-memory-mock'; error?: string };
 }
-
-let redisClient: Redis | null = null;
-const inMemoryFallback = new InMemoryRedis();
-let isRealRedisConnected = false;
-let lastRedisError = '';
 
 const redisUrl = process.env.REDIS_URL;
+const restUrl = process.env.UPSTASH_REDIS_REST_URL;
+const restToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-if (redisUrl) {
-  try {
-    redisClient = new Redis(redisUrl, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-      connectTimeout: 2500,
-      retryStrategy: () => null, // don't spam if unreachable
-    });
+let lastRedisError = '';
+let driver: RedisDriver | null = null;
 
-    redisClient.on('connect', () => {
-      console.log('✅ [Redis] Connected to external Redis instance');
-      isRealRedisConnected = true;
-      lastRedisError = '';
-    });
-
-    redisClient.on('error', (err) => {
-      isRealRedisConnected = false;
-      lastRedisError = err.message;
-      console.warn('⚠️ [Redis] Offline or unreachable, falling back to in-memory store:', err.message);
-    });
-
-    // Try connecting in background
-    redisClient.connect().catch((err) => {
-      isRealRedisConnected = false;
-      lastRedisError = err.message;
-      console.warn('⚠️ [Redis] Connection failed, using in-memory store:', err.message);
-    });
-  } catch (err) {
-    console.warn('⚠️ [Redis] Initialization failed, using in-memory store');
-    redisClient = null;
-  }
-} else {
-  console.log('ℹ️ [Redis] No REDIS_URL provided. Running high-speed in-memory store.');
+function logError(message: string) {
+  // Only log when the reason changes, retry loops would otherwise spam
+  if (message !== lastRedisError) console.error('❌ [Redis]', message);
+  lastRedisError = message;
 }
 
-export const redis: RedisService = {
-  async get(key: string): Promise<string | null> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        return await redisClient.get(key);
-      } catch {
-        return inMemoryFallback.get(key);
-      }
-    }
-    return inMemoryFallback.get(key);
-  },
+function isValidRedisUrl(url: string) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'redis:' || u.protocol === 'rediss:';
+  } catch {
+    return false;
+  }
+}
 
-  async set(key: string, value: string, mode?: string, duration?: number): Promise<'OK'> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        if (mode === 'EX' && duration) {
-          await redisClient.set(key, value, 'EX', duration);
-        } else {
-          await redisClient.set(key, value);
-        }
-        // Mirror in memory for instant read fallback
-        inMemoryFallback.set(key, value, mode, duration);
-        return 'OK';
-      } catch {
-        return inMemoryFallback.set(key, value, mode, duration);
-      }
-    }
-    return inMemoryFallback.set(key, value, mode, duration);
-  },
+function createTcpDriver(url: string): RedisDriver {
+  const client = new IORedis(url, {
+    connectTimeout: 5000,
+    maxRetriesPerRequest: 1,
+    // Fail commands immediately while disconnected instead of queueing them
+    enableOfflineQueue: false,
+    // Keep trying to (re)connect in the background, backing off to every 5s
+    retryStrategy: (times) => Math.min(times * 500, 5000),
+  });
+  client.on('ready', () => {
+    lastRedisError = '';
+    console.log('✅ [Redis] Connected (TCP)');
+  });
+  client.on('error', (err) => logError(err.message));
 
-  async del(...keys: string[]): Promise<number> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        await redisClient.del(...keys);
-      } catch (e) {
-        // ignore
-      }
-    }
-    return inMemoryFallback.del(...keys);
-  },
+  return {
+    mode: 'tcp',
+    isReady: () => client.status === 'ready',
+    get: (key) => client.get(key),
+    set: (key, value, ex) => (ex ? client.set(key, value, 'EX', ex) : client.set(key, value)),
+    del: (...keys) => client.del(...keys),
+    incr: (key) => client.incr(key),
+    expire: (key, seconds) => client.expire(key, seconds),
+    keys: (pattern) => client.keys(pattern),
+  };
+}
 
-  async incr(key: string): Promise<number> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        const val = await redisClient.incr(key);
-        await inMemoryFallback.set(key, String(val));
-        return val;
-      } catch {
-        return inMemoryFallback.incr(key);
-      }
-    }
-    return inMemoryFallback.incr(key);
-  },
+function createRestDriver(url: string, token: string): RedisDriver {
+  // Keep values as raw strings: callers JSON.parse what they stored themselves
+  const client = new UpstashRedis({ url, token, automaticDeserialization: false });
+  let ready = false;
 
-  async expire(key: string, seconds: number): Promise<number> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        await redisClient.expire(key, seconds);
-      } catch (e) {
-        // ignore
-      }
+  // REST is stateless, so "connected" means the last health ping succeeded.
+  // Ping every 5s while down, every 60s while up (Upstash bills per command).
+  const ping = async () => {
+    try {
+      await client.ping();
+      if (!ready) console.log('✅ [Redis] Connected (Upstash REST)');
+      ready = true;
+      lastRedisError = '';
+    } catch (err: any) {
+      ready = false;
+      logError(err?.message || 'Upstash REST ping failed');
     }
-    return inMemoryFallback.expire(key, seconds);
-  },
+    setTimeout(ping, ready ? 60000 : 5000).unref();
+  };
+  ping();
 
-  async hset(key: string, field: string, value: string): Promise<number> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        await redisClient.hset(key, field, value);
-      } catch (e) {
-        // ignore
-      }
+  // A failed command also marks the connection down until the next good ping
+  const track = async <T,>(p: Promise<T>): Promise<T> => {
+    try {
+      return await p;
+    } catch (err: any) {
+      ready = false;
+      logError(err?.message || 'Upstash REST request failed');
+      throw new BackendUnavailableError('Redis', lastRedisError);
     }
-    return inMemoryFallback.hset(key, field, value);
-  },
+  };
 
-  async hget(key: string, field: string): Promise<string | null> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        return await redisClient.hget(key, field);
-      } catch {
-        return inMemoryFallback.hget(key, field);
-      }
-    }
-    return inMemoryFallback.hget(key, field);
-  },
+  return {
+    mode: 'rest',
+    isReady: () => ready,
+    get: (key) => track(client.get<string>(key)),
+    set: (key, value, ex) => track(ex ? client.set(key, value, { ex }) : client.set(key, value)),
+    del: (...keys) => track(client.del(...keys)),
+    incr: (key) => track(client.incr(key)),
+    expire: (key, seconds) => track(client.expire(key, seconds)),
+    keys: (pattern) => track(client.keys(pattern)),
+  };
+}
 
-  async hgetall(key: string): Promise<Record<string, string>> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        return await redisClient.hgetall(key);
-      } catch {
-        return inMemoryFallback.hgetall(key);
-      }
-    }
-    return inMemoryFallback.hgetall(key);
-  },
+if (redisUrl) {
+  if (isValidRedisUrl(redisUrl)) {
+    lastRedisError = 'Đang kết nối…';
+    driver = createTcpDriver(redisUrl);
+  } else {
+    // e.g. a pasted "redis-cli --tls -u ..." command: report it instead of crashing the server
+    logError('REDIS_URL không hợp lệ (phải có dạng redis:// hoặc rediss://user:pass@host:port)');
+  }
+} else if (restUrl && restToken) {
+  lastRedisError = 'Đang kết nối…';
+  driver = createRestDriver(restUrl, restToken);
+} else {
+  logError('Chưa cấu hình REDIS_URL hoặc UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN');
+}
 
-  async keys(pattern: string): Promise<string[]> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        return await redisClient.keys(pattern);
-      } catch {
-        return inMemoryFallback.keys(pattern);
-      }
-    }
-    return inMemoryFallback.keys(pattern);
-  },
+function ready(): RedisDriver {
+  if (!driver || !driver.isReady()) {
+    throw new BackendUnavailableError('Redis', lastRedisError || 'not connected');
+  }
+  return driver;
+}
 
-  async ping(): Promise<string> {
-    if (isRealRedisConnected && redisClient) {
-      try {
-        return await redisClient.ping();
-      } catch {
-        return inMemoryFallback.ping();
-      }
-    }
-    return inMemoryFallback.ping();
-  },
+export const redis = {
+  get: (key: string) => ready().get(key),
 
-  getStatus() {
+  set: (key: string, value: string, mode?: 'EX', seconds?: number) =>
+    ready().set(key, value, mode === 'EX' ? seconds : undefined),
+
+  del: (...keys: string[]) => ready().del(...keys),
+
+  incr: (key: string) => ready().incr(key),
+
+  expire: (key: string, seconds: number) => ready().expire(key, seconds),
+
+  keys: (pattern: string) => ready().keys(pattern),
+
+  getStatus(): RedisStatus {
+    const connected = Boolean(driver?.isReady());
     return {
-      connected: isRealRedisConnected,
-      provider: isRealRedisConnected ? 'ioredis' : 'in-memory-mock',
-      error: lastRedisError || undefined,
+      configured: Boolean(driver) || Boolean(redisUrl),
+      connected,
+      mode: driver?.mode,
+      error: connected ? undefined : lastRedisError || undefined,
     };
   },
 };

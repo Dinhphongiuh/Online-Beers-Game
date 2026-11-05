@@ -1,13 +1,14 @@
+// Must be the first import: server/*.ts read process.env when they are imported
+import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dbService, initMongo, verifyPassword } from './server/db.ts';
 import { redis } from './server/redis.ts';
+import { isDatabaseConnectionError } from './server/errors.ts';
 
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,12 +71,29 @@ const FALLBACK_TOASTS = [
 // BACKEND STATUS & HEALTH ENDPOINTS (MongoDB + Redis)
 // ----------------------------------------------------------------------------
 
-app.get('/api/status', async (_req, res) => {
-  const dbStatus = dbService.getStatus();
+function backendStatus() {
+  const mongodb = dbService.getStatus();
   const redisStatus = redis.getStatus();
+  return { ready: mongodb.connected && redisStatus.connected, mongodb, redis: redisStatus };
+}
+
+/** 503 when MongoDB/Redis is down, 500 for anything else. */
+function sendServerError(res: express.Response, error: unknown, message: string) {
+  if (isDatabaseConnectionError(error)) {
+    return res.status(503).json({
+      error: 'Không kết nối được máy chủ dữ liệu (MongoDB/Redis). Vui lòng thử lại sau.',
+      backend: backendStatus(),
+    });
+  }
+  return res.status(500).json({ error: message });
+}
+
+app.get('/api/status', async (_req, res) => {
+  const { ready, mongodb: dbStatus, redis: redisStatus } = backendStatus();
 
   res.json({
-    status: 'ok',
+    status: ready ? 'ok' : 'unavailable',
+    ready,
     timestamp: Date.now(),
     database: {
       mongodb: dbStatus,
@@ -84,6 +102,20 @@ app.get('/api/status', async (_req, res) => {
     gemini: {
       configured: Boolean(apiKey),
     },
+  });
+});
+
+// Every other API needs MongoDB + Redis: there is no in-memory fallback.
+app.use('/api', (req, res, next) => {
+  const status = backendStatus();
+  if (status.ready) return next();
+  const missing = [
+    !status.mongodb.connected && `MongoDB (${status.mongodb.error || 'chưa kết nối'})`,
+    !status.redis.connected && `Redis (${status.redis.error || 'chưa kết nối'})`,
+  ].filter(Boolean);
+  res.status(503).json({
+    error: `Không kết nối được máy chủ: ${missing.join(', ')}`,
+    backend: status,
   });
 });
 
@@ -153,7 +185,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Đăng ký thất bại do lỗi hệ thống' });
+    sendServerError(res, error, 'Đăng ký thất bại do lỗi hệ thống');
   }
 });
 
@@ -177,6 +209,16 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     await dbService.updateUser(user.userId, { lastLogin: new Date() });
+    // Self-heal accounts whose profile was never created (e.g. an earlier failed registration)
+    if (!(await dbService.getPlayerProfile(user.userId))) {
+      await dbService.updatePlayerProfile(user.userId, {
+        name: user.username,
+        avatar: user.avatar,
+        title: user.title,
+        coins: user.coins,
+        gems: user.gems,
+      });
+    }
 
     const token = crypto.randomBytes(32).toString('hex');
     const sessionData = {
@@ -202,7 +244,7 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Đăng nhập thất bại do lỗi hệ thống' });
+    sendServerError(res, error, 'Đăng nhập thất bại do lỗi hệ thống');
   }
 });
 
@@ -243,7 +285,7 @@ app.post('/api/auth/guest', async (req, res) => {
     });
   } catch (error) {
     console.error('Guest auth error:', error);
-    res.status(500).json({ error: 'Không thể tạo phiên nhậu chui' });
+    sendServerError(res, error, 'Không thể tạo phiên nhậu chui');
   }
 });
 
@@ -271,7 +313,7 @@ app.get('/api/auth/me', async (req, res) => {
     return res.json({ authenticated: true, user: session });
   } catch (error) {
     console.error('Auth verification error:', error);
-    res.status(500).json({ error: 'Lỗi xác thực phiên' });
+    sendServerError(res, error, 'Lỗi xác thực phiên');
   }
 });
 
@@ -326,7 +368,7 @@ app.get('/api/rooms/:roomId', async (req, res) => {
     return res.status(404).json({ error: 'Room not found' });
   } catch (error) {
     console.error('Error fetching room:', error);
-    res.status(500).json({ error: 'Failed to retrieve room' });
+    sendServerError(res, error, 'Failed to retrieve room');
   }
 });
 
@@ -355,7 +397,7 @@ app.post('/api/rooms', async (req, res) => {
     res.json({ success: true, room: saved });
   } catch (error) {
     console.error('Error saving room:', error);
-    res.status(500).json({ error: 'Failed to save room' });
+    sendServerError(res, error, 'Failed to save room');
   }
 });
 
@@ -374,7 +416,7 @@ app.post('/api/rooms/:roomId/heartbeat', async (req, res) => {
 
     res.json({ success: true, active: true });
   } catch (error) {
-    res.status(500).json({ error: 'Heartbeat error' });
+    sendServerError(res, error, 'Heartbeat error');
   }
 });
 
@@ -396,7 +438,7 @@ app.get('/api/rooms/:roomId/presence', async (req, res) => {
     }
     res.json({ roomId, activeCount: activePlayers.length, players: activePlayers });
   } catch (error) {
-    res.status(500).json({ error: 'Presence check error' });
+    sendServerError(res, error, 'Presence check error');
   }
 });
 
@@ -429,7 +471,7 @@ app.post('/api/rooms/:roomId/chat', async (req, res) => {
     res.json({ success: true, message: msg });
   } catch (error) {
     console.error('Error posting chat message:', error);
-    res.status(500).json({ error: 'Failed to post message' });
+    sendServerError(res, error, 'Failed to post message');
   }
 });
 
@@ -440,7 +482,7 @@ app.get('/api/rooms/:roomId/chat', async (req, res) => {
     const room = await dbService.getRoom(roomId);
     res.json({ messages: room?.chatMessages || [] });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get messages' });
+    sendServerError(res, error, 'Failed to get messages');
   }
 });
 
@@ -453,7 +495,7 @@ app.get('/api/leaderboard', async (_req, res) => {
     const leaderboard = await dbService.getLeaderboard(15);
     res.json({ leaderboard });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    sendServerError(res, error, 'Failed to fetch leaderboard');
   }
 });
 
@@ -466,7 +508,7 @@ app.get('/api/players/:playerId', async (req, res) => {
     }
     res.json({ profile });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get player profile' });
+    sendServerError(res, error, 'Failed to get player profile');
   }
 });
 
@@ -476,7 +518,7 @@ app.post('/api/players/:playerId', async (req, res) => {
     const updated = await dbService.updatePlayerProfile(playerId, req.body);
     res.json({ success: true, profile: updated });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update player profile' });
+    sendServerError(res, error, 'Failed to update player profile');
   }
 });
 
@@ -496,7 +538,7 @@ app.post('/api/rooms/:roomId/game-record', async (req, res) => {
     });
     res.json({ success: true, record });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to record game' });
+    sendServerError(res, error, 'Failed to record game');
   }
 });
 
@@ -623,28 +665,20 @@ app.post('/api/drunk-banter', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
-// DATABASE ERROR MIDDLEWARE (Graceful handling required by AI Studio guidelines)
+// ERROR HANDLER: database outages surface as 503 (never as fake empty data)
 // ----------------------------------------------------------------------------
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (
-    err.name === 'MongooseError' ||
-    err.name === 'MongoNetworkError' ||
-    (err.message && err.message.includes('buffering timed out'))
-  ) {
-    console.warn('[AI Studio] Database offline — returning mock response');
-    if (req.method === 'GET') {
-      return res.json(req.path.endsWith('s') || req.path.endsWith('s/') ? [] : {});
-    }
-    return res.status(503).json({ error: 'Service temporarily unavailable (database offline)' });
-  }
-  next(err);
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(err);
+  console.error('Unhandled API error:', err);
+  sendServerError(res, err, 'Lỗi hệ thống');
 });
 
 // Setup Vite in Dev or Serve Static in Prod
 async function startServer() {
   // Initialize MongoDB connection asynchronously
-  await initMongo();
+  // Connects in the background (with retries); APIs answer 503 until it is up
+  void initMongo();
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

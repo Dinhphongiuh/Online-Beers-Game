@@ -442,15 +442,15 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
   const [copiedJson, setCopiedJson] = useState(false);
 
   // Form State
-  const [loginIdentifier, setLoginIdentifier] = useState('cauvang_doluc@nhau.vn');
-  const [password, setPassword] = useState('khongsaykhongve123');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
 
   // Sign Up State
   const [signupNickname, setSignupNickname] = useState('Chiến Thần Bờ Kè');
   const [signupEmail, setSignupEmail] = useState('chienthan_boke@nhau.vn');
-  const [signupPassword, setSignupPassword] = useState('khongsaykhongve123');
+  const [signupPassword, setSignupPassword] = useState('');
   const [selectedSpecies, setSelectedSpecies] = useState<SpeciesInfo>(SPECIES_LIST[0]);
   const [signupArchetype, setSignupArchetype] = useState(DRUNK_ARCHETYPES[0]);
   const [signupTolerance, setSignupTolerance] = useState(75);

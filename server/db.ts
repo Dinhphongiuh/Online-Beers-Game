@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import crypto from 'crypto';
+import { BackendUnavailableError } from './errors.ts';
 
 // Ensure Mongoose fails fast without buffering when DB is offline
 mongoose.set('bufferCommands', false);
@@ -212,352 +213,158 @@ export const PlayerProfileModel = mongoose.model<IPlayerProfile>('PlayerProfile'
 export const GameHistoryModel = mongoose.model<IGameHistory>('GameHistory', GameHistorySchema);
 
 // ----------------------------------------------------------------------------
-// IN-MEMORY DATA STORE (Zero-friction fallback if MongoDB is offline)
+// MONGO DB CONNECTION (required — no in-memory fallback)
 // ----------------------------------------------------------------------------
 
-class InMemoryDataStore {
-  rooms = new Map<string, any>();
-  playerProfiles = new Map<string, any>();
-  users = new Map<string, any>();
-  gameHistory: any[] = [];
+const mongoUri = process.env.MONGODB_URI;
+let lastMongoError = mongoUri ? 'Đang kết nối…' : 'Chưa cấu hình MONGODB_URI';
+const RETRY_MS = 5000;
 
-  constructor() {
-    // Seed default registered demo user
-    const defaultPasswordHash = hashPassword('khongsaykhongve123');
-    this.users.set('cauvang_doluc', {
-      userId: 'cauvang_doluc',
-      username: 'cauvang_doluc',
-      email: 'cauvang_doluc@nhau.vn',
-      passwordHash: defaultPasswordHash,
-      avatar: 'dog',
-      title: 'Hệ Nhiệt Tình • Cậu Vàng',
-      clothing: 'tanktop_white',
-      hat: 'sunglasses',
-      glassType: 'beer_mug',
-      coins: 740,
-      gems: 10,
-      drunkArchetype: 'TRIET_GIA',
-      declaredTolerance: 75,
-      drinksCount: 5,
-      foodEatenCount: 2,
-      gamesWon: 2,
-      timesPassedOut: 0,
-      isGuest: false,
-      lastLogin: new Date(),
-      createdAt: new Date(),
-    });
-    // Seed initial demo player profiles
-    this.playerProfiles.set('user', {
-      playerId: 'user',
-      name: 'Bợm Nhậu (Bạn)',
-      avatar: 'dog',
-      title: 'Tấm Chiếu Mới',
-      clothing: 'tanktop_red',
-      hat: 'none',
-      glassType: 'beer_mug',
-      coins: 240,
-      gems: 10,
-      drinksCount: 2,
-      foodEatenCount: 0,
-      gamesWon: 1,
-      timesPassedOut: 0,
-      lastActive: new Date(),
-    });
-    this.playerProfiles.set('bot_phiquan', {
-      playerId: 'bot_phiquan',
-      name: 'Phi Quân',
-      avatar: 'panda',
-      title: 'Gấu Trúc Đô Bất Tử',
-      clothing: 'floral_shirt',
-      hat: 'sunglasses',
-      glassType: 'coi_glass',
-      coins: 500,
-      gems: 20,
-      drinksCount: 15,
-      foodEatenCount: 8,
-      gamesWon: 6,
-      timesPassedOut: 1,
-      lastActive: new Date(),
-    });
-    this.playerProfiles.set('bot_khoanguyen', {
-      playerId: 'bot_khoanguyen',
-      name: 'Khoa Nguyễn',
-      avatar: 'bear',
-      title: 'Gấu Nâu Diệt Mồi',
-      clothing: 'tanktop_white',
-      hat: 'none',
-      glassType: 'beer_mug',
-      coins: 380,
-      gems: 15,
-      drinksCount: 12,
-      foodEatenCount: 19,
-      gamesWon: 4,
-      timesPassedOut: 2,
-      lastActive: new Date(),
-    });
-    this.playerProfiles.set('bot_baonguyen', {
-      playerId: 'bot_baonguyen',
-      name: 'Bảo Nguyễn',
-      avatar: 'cat',
-      title: 'Chúa Tể Trốn Bill',
-      clothing: 'gold_chain',
-      hat: 'traffic_helmet',
-      glassType: 'horn',
-      coins: 850,
-      gems: 50,
-      drinksCount: 18,
-      foodEatenCount: 3,
-      gamesWon: 9,
-      timesPassedOut: 3,
-      lastActive: new Date(),
-    });
-    this.playerProfiles.set('bot_ngaphan', {
-      playerId: 'bot_ngaphan',
-      name: 'Nga Phan',
-      avatar: 'hamster',
-      title: 'Uống Coca • Thánh Phá Mồi 🥤',
-      clothing: 'floral_shirt',
-      hat: 'none',
-      glassType: 'coi_glass',
-      coins: 620,
-      gems: 30,
-      drinksCount: 0,
-      foodEatenCount: 25,
-      gamesWon: 5,
-      timesPassedOut: 0,
-      lastActive: new Date(),
-    });
-  }
-}
+mongoose.connection.on('connected', () => {
+  lastMongoError = '';
+  console.log('✅ [MongoDB] Connected');
+});
+mongoose.connection.on('disconnected', () => {
+  if (!lastMongoError) lastMongoError = 'Mất kết nối MongoDB';
+  console.error('❌ [MongoDB] Disconnected');
+});
 
-const memoryStore = new InMemoryDataStore();
-
-// ----------------------------------------------------------------------------
-// MONGO DB CONNECTION STATE
-// ----------------------------------------------------------------------------
-
-let isMongoConnected = false;
-let lastMongoError = '';
-
+/**
+ * Connects to MongoDB and keeps retrying in the background until it succeeds.
+ * Never throws: while disconnected, data access throws BackendUnavailableError (HTTP 503).
+ */
 export async function initMongo() {
-  const mongoUri = process.env.MONGODB_URI;
   if (!mongoUri) {
-    console.log('ℹ️ [MongoDB] No MONGODB_URI provided. Running in-memory MongoDB fallback store.');
+    console.error('❌ [MongoDB] MONGODB_URI is not set — accounts, rooms and leaderboards are unavailable.');
     return;
   }
+  const attempt = async () => {
+    try {
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 4000 });
+    } catch (err: any) {
+      const message = err?.message || 'Unknown connection error';
+      if (message !== lastMongoError) console.error('❌ [MongoDB] Unreachable:', message);
+      lastMongoError = message;
+      setTimeout(attempt, RETRY_MS);
+    }
+  };
+  await attempt();
+}
 
-  try {
-    await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 2500,
-    });
-    isMongoConnected = true;
-    lastMongoError = '';
-    console.log('✅ [MongoDB] Successfully connected to MongoDB database');
-  } catch (err: any) {
-    isMongoConnected = false;
-    lastMongoError = err.message || 'Unknown connection error';
-    console.warn('⚠️ [MongoDB] Offline or unreachable, falling back to in-memory store:', lastMongoError);
+function requireMongo() {
+  if (mongoose.connection.readyState !== 1) {
+    throw new BackendUnavailableError('MongoDB', lastMongoError || 'not connected');
   }
 }
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // ----------------------------------------------------------------------------
-// UNIFIED DATA ACCESS SERVICES (Seamless Mongo + Fallback)
+// DATA ACCESS SERVICES
 // ----------------------------------------------------------------------------
 
 export const dbService = {
   getStatus() {
+    const connected = mongoose.connection.readyState === 1;
     return {
-      connected: isMongoConnected,
-      provider: isMongoConnected ? 'mongodb-mongoose' : 'in-memory-mock',
-      error: lastMongoError || undefined,
+      configured: Boolean(mongoUri),
+      connected,
+      error: connected ? undefined : lastMongoError || undefined,
     };
   },
 
   // --- ROOMS / TABLES ---
   async getRoom(roomId: string) {
-    if (isMongoConnected) {
-      try {
-        const room = await RoomModel.findOne({ roomId }).lean();
-        if (room) return room;
-      } catch (err) {
-        console.warn('MongoDB getRoom query failed, checking memory:', err);
-      }
-    }
-    return memoryStore.rooms.get(roomId) || null;
+    requireMongo();
+    return RoomModel.findOne({ roomId }).lean();
   },
 
   async upsertRoom(roomId: string, data: Partial<IRoom>) {
-    const updatedData = {
-      roomId,
-      ...data,
-      updatedAt: new Date(),
-    };
-
-    // Always keep memoryStore updated
-    const existing = memoryStore.rooms.get(roomId) || { createdAt: new Date() };
-    const merged = { ...existing, ...updatedData };
-    memoryStore.rooms.set(roomId, merged);
-
-    if (isMongoConnected) {
-      try {
-        await RoomModel.findOneAndUpdate(
-          { roomId },
-          { $set: updatedData },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      } catch (err) {
-        console.warn('MongoDB upsertRoom failed, saved in memory:', err);
-      }
-    }
-
-    return merged;
+    requireMongo();
+    return RoomModel.findOneAndUpdate(
+      { roomId },
+      { $set: { ...data, roomId } },
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+    ).lean();
   },
 
-  async addRoomChatMessage(roomId: string, message: { id: string; sender: string; text: string; drunkLevel?: number; timestamp: number }) {
-    const room = await this.getRoom(roomId);
-    if (!room) return null;
-
-    const messages = room.chatMessages || [];
-    messages.push(message);
-    // keep last 50 messages
-    if (messages.length > 50) messages.splice(0, messages.length - 50);
-
-    return this.upsertRoom(roomId, { chatMessages: messages });
+  async addRoomChatMessage(
+    roomId: string,
+    message: { id: string; sender: string; text: string; drunkLevel?: number; timestamp: number }
+  ) {
+    requireMongo();
+    // Keep only the last 50 messages
+    return RoomModel.findOneAndUpdate(
+      { roomId },
+      { $push: { chatMessages: { $each: [message], $slice: -50 } } },
+      { returnDocument: 'after' }
+    ).lean();
   },
 
-  async addTruthOrDareLog(roomId: string, log: { id: string; type: string; text: string; target?: string; source?: string; completedAt: number }) {
-    const room = await this.getRoom(roomId);
-    if (!room) return null;
-
-    const logs = room.truthOrDareLogs || [];
-    logs.push(log);
-    if (logs.length > 50) logs.splice(0, logs.length - 50);
-
-    return this.upsertRoom(roomId, { truthOrDareLogs: logs });
+  async addTruthOrDareLog(
+    roomId: string,
+    log: { id: string; type: string; text: string; target?: string; source?: string; completedAt: number }
+  ) {
+    requireMongo();
+    return RoomModel.findOneAndUpdate(
+      { roomId },
+      { $push: { truthOrDareLogs: { $each: [log], $slice: -50 } } },
+      { returnDocument: 'after' }
+    ).lean();
   },
 
   // --- PLAYERS / PROFILES ---
   async getPlayerProfile(playerId: string) {
-    if (isMongoConnected) {
-      try {
-        const profile = await PlayerProfileModel.findOne({ playerId }).lean();
-        if (profile) return profile;
-      } catch (err) {
-        console.warn('MongoDB getPlayerProfile failed, checking memory:', err);
-      }
-    }
-    return memoryStore.playerProfiles.get(playerId) || null;
+    requireMongo();
+    return PlayerProfileModel.findOne({ playerId }).lean();
   },
 
   async updatePlayerProfile(playerId: string, updates: Partial<IPlayerProfile>) {
-    const existing = memoryStore.playerProfiles.get(playerId) || {
-      playerId,
-      name: 'Bợm Nhậu',
-      coins: 200,
-      gems: 10,
-      drinksCount: 0,
-      foodEatenCount: 0,
-      gamesWon: 0,
-      timesPassedOut: 0,
-      createdAt: new Date(),
-    };
-
-    const merged = { ...existing, ...updates, lastActive: new Date() };
-    memoryStore.playerProfiles.set(playerId, merged);
-
-    if (isMongoConnected) {
-      try {
-        await PlayerProfileModel.findOneAndUpdate(
-          { playerId },
-          { $set: updates, $setOnInsert: { createdAt: new Date() } },
-          { upsert: true, new: true }
-        );
-      } catch (err) {
-        console.warn('MongoDB updatePlayerProfile failed, saved in memory:', err);
-      }
-    }
-
-    return merged;
+    requireMongo();
+    const { playerId: _ignored, ...safeUpdates } = updates as Record<string, unknown>;
+    // `name` is required on insert; only default it via $setOnInsert when it isn't
+    // already in $set (the same path in both operators is a ConflictingUpdateOperators error)
+    const update: Record<string, unknown> = { $set: { ...safeUpdates, lastActive: new Date() } };
+    if (!safeUpdates.name) update.$setOnInsert = { name: 'Bợm Nhậu' };
+    return PlayerProfileModel.findOneAndUpdate({ playerId }, update, {
+      upsert: true,
+      returnDocument: 'after',
+      setDefaultsOnInsert: true,
+    }).lean();
   },
 
   async getLeaderboard(limit = 10) {
-    if (isMongoConnected) {
-      try {
-        const top = await PlayerProfileModel.find()
-          .sort({ drinksCount: -1, coins: -1 })
-          .limit(limit)
-          .lean();
-        if (top && top.length > 0) return top;
-      } catch (err) {
-        console.warn('MongoDB getLeaderboard failed, fallback to memory:', err);
-      }
-    }
-
-    const profiles = Array.from(memoryStore.playerProfiles.values());
-    profiles.sort((a, b) => (b.drinksCount || 0) - (a.drinksCount || 0) || (b.coins || 0) - (a.coins || 0));
-    return profiles.slice(0, limit);
+    requireMongo();
+    return PlayerProfileModel.find().sort({ drinksCount: -1, coins: -1 }).limit(limit).lean();
   },
 
   // --- GAME HISTORY ---
-  async recordGame(gameData: { gameId: string; roomId: string; gameType: string; winnerId: string; winnerName: string; details?: any }) {
-    const record = { ...gameData, createdAt: new Date() };
-    memoryStore.gameHistory.push(record);
-
-    if (isMongoConnected) {
-      try {
-        await GameHistoryModel.create(record);
-      } catch (err) {
-        console.warn('MongoDB recordGame failed, saved in memory:', err);
-      }
-    }
-
-    return record;
+  async recordGame(gameData: {
+    gameId: string;
+    roomId: string;
+    gameType: string;
+    winnerId: string;
+    winnerName: string;
+    details?: any;
+  }) {
+    requireMongo();
+    const doc = await GameHistoryModel.create(gameData);
+    return doc.toObject();
   },
 
-  // --- AUTH & USERS (AUTHENTIC REAL DATABASE / IN-MEMORY PERSISTENCE) ---
+  // --- AUTH & USERS ---
   async findUserByIdentifier(identifier: string): Promise<any | null> {
     const cleanId = (identifier || '').trim().toLowerCase();
     if (!cleanId) return null;
-
-    if (isMongoConnected) {
-      try {
-        const user = await UserModel.findOne({
-          $or: [
-            { username: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
-            { email: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
-          ],
-        }).lean();
-        if (user) return user;
-      } catch (err) {
-        console.warn('MongoDB findUserByIdentifier query failed, checking memory:', err);
-      }
-    }
-
-    for (const u of memoryStore.users.values()) {
-      if (
-        (u.username && u.username.toLowerCase() === cleanId) ||
-        (u.email && u.email.toLowerCase() === cleanId) ||
-        (u.userId && u.userId.toLowerCase() === cleanId)
-      ) {
-        return u;
-      }
-    }
-    return null;
+    requireMongo();
+    const exact = new RegExp(`^${escapeRegex(cleanId)}$`, 'i');
+    return UserModel.findOne({ $or: [{ username: exact }, { email: exact }, { userId: cleanId }] }).lean();
   },
 
   async findUserById(userId: string): Promise<any | null> {
     if (!userId) return null;
-
-    if (isMongoConnected) {
-      try {
-        const user = await UserModel.findOne({ userId }).lean();
-        if (user) return user;
-      } catch (err) {
-        console.warn('MongoDB findUserById failed, checking memory:', err);
-      }
-    }
-
-    return memoryStore.users.get(userId) || null;
+    requireMongo();
+    return UserModel.findOne({ userId }).lean();
   },
 
   async createUser(userData: {
@@ -572,79 +379,51 @@ export const dbService = {
     isGuest?: boolean;
     roomPin?: string;
   }): Promise<any> {
-    const userId = userData.isGuest
-      ? `guest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-      : userData.username.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    requireMongo();
+    // Strip Vietnamese diacritics before slugging so "Hòa" and "Hoà" don't both become "ho_",
+    // and add a random suffix so different usernames can never collide on userId
+    const slug =
+      userData.username
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[đĐ]/g, 'd')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 24) || 'user';
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const userId = userData.isGuest ? `guest_${Date.now()}_${suffix}` : `${slug}_${suffix}`;
 
-    const passwordHash = userData.password ? hashPassword(userData.password) : undefined;
-
-    const userObj = {
+    const doc = await UserModel.create({
       userId,
       username: userData.username,
       email: userData.email?.toLowerCase(),
-      passwordHash,
+      passwordHash: userData.password ? hashPassword(userData.password) : undefined,
       avatar: userData.avatar || 'dog',
       title: userData.title || 'Tấm Chiếu Mới',
-      clothing: 'tanktop_red',
-      hat: 'none',
-      glassType: 'beer_mug',
       coins: userData.coins ?? 740,
-      gems: 10,
       drunkArchetype: userData.drunkArchetype || 'TRIET_GIA',
       declaredTolerance: userData.declaredTolerance ?? 50,
-      drinksCount: 0,
-      foodEatenCount: 0,
-      gamesWon: 0,
-      timesPassedOut: 0,
       isGuest: Boolean(userData.isGuest),
       roomPin: userData.roomPin,
       lastLogin: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    });
+    const user = doc.toObject();
 
-    memoryStore.users.set(userId, userObj);
-
-    // Also sync with player profile for table leaderboards
+    // Keep the table leaderboard profile in sync
     await this.updatePlayerProfile(userId, {
-      name: userObj.username,
-      avatar: userObj.avatar,
-      title: userObj.title,
-      coins: userObj.coins,
-      gems: userObj.gems,
+      name: user.username,
+      avatar: user.avatar,
+      title: user.title,
+      coins: user.coins,
+      gems: user.gems,
     });
 
-    if (isMongoConnected) {
-      try {
-        await UserModel.create(userObj);
-      } catch (err) {
-        console.warn('MongoDB createUser failed, stored in memory:', err);
-      }
-    }
-
-    return userObj;
+    return user;
   },
 
   async updateUser(userId: string, updates: Partial<IUser>): Promise<any> {
-    const existing = await this.findUserById(userId);
-    if (!existing) return null;
-
-    const merged = { ...existing, ...updates, updatedAt: new Date() };
-    memoryStore.users.set(userId, merged);
-
-    if (isMongoConnected) {
-      try {
-        await UserModel.findOneAndUpdate(
-          { userId },
-          { $set: updates },
-          { new: true }
-        );
-      } catch (err) {
-        console.warn('MongoDB updateUser failed, updated in memory:', err);
-      }
-    }
-
-    return merged;
+    requireMongo();
+    return UserModel.findOneAndUpdate({ userId }, { $set: updates }, { returnDocument: 'after' }).lean();
   },
 };
-
