@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import crypto from 'crypto';
 import { BackendUnavailableError } from './errors.ts';
+import { normalizeEmail, normalizeUsername, usernameKey } from '../shared/validation.ts';
 
 // Ensure Mongoose fails fast without buffering when DB is offline
 mongoose.set('bufferCommands', false);
@@ -31,6 +32,8 @@ export function verifyPassword(password: string, combinedHash?: string): boolean
 export interface IUser extends Document {
   userId: string;
   username: string;
+  /** Case-insensitive uniqueness key for `username` (see shared/validation.ts usernameKey) */
+  usernameKey?: string;
   email?: string;
   passwordHash?: string;
   avatar: string;
@@ -185,6 +188,9 @@ const UserSchema = new Schema<IUser>(
   {
     userId: { type: String, required: true, unique: true, index: true },
     username: { type: String, required: true, unique: true, index: true },
+    // Unique, case/whitespace-insensitive form of username. Sparse so legacy rows without it
+    // don't collide while they are being backfilled.
+    usernameKey: { type: String, unique: true, sparse: true },
     email: { type: String, sparse: true, index: true },
     passwordHash: { type: String },
     avatar: { type: String, default: 'dog' },
@@ -223,7 +229,58 @@ const RETRY_MS = 5000;
 mongoose.connection.on('connected', () => {
   lastMongoError = '';
   console.log('✅ [MongoDB] Connected');
+  backfillUsernameKeys().catch((err) => console.error('❌ [MongoDB] usernameKey backfill failed:', err));
 });
+
+/**
+ * Give accounts created before usernameKey existed their key, so uniqueness covers them too.
+ * Legacy duplicate *guest* names get the same "#1234" tag new guests get; duplicate registered
+ * accounts are only logged (never renamed automatically).
+ */
+async function backfillUsernameKeys() {
+  // The legacy `username` unique index cannot build while duplicates exist: don't let that stop us
+  await UserModel.createIndexes().catch((err) =>
+    console.warn('⚠️ [MongoDB] Some user indexes could not be built yet:', err?.message)
+  );
+
+  const legacy = await UserModel.find(
+    { usernameKey: { $exists: false } },
+    { userId: 1, username: 1, isGuest: 1 }
+  ).lean();
+  let fixed = 0;
+  for (const u of legacy) {
+    let name = u.username;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        await UserModel.updateOne({ userId: u.userId }, { $set: { username: name, usernameKey: usernameKey(name) } });
+        fixed++;
+        if (name !== u.username) console.log(`ℹ️ [MongoDB] Duplicate guest "${u.username}" renamed to "${name}"`);
+        break;
+      } catch (err) {
+        if (!isDuplicateKeyError(err)) throw err;
+        if (!u.isGuest) {
+          console.warn(`⚠️ [MongoDB] Account "${u.username}" (${u.userId}) duplicates another name; rename it manually.`);
+          break;
+        }
+        name = `${normalizeUsername(u.username)} #${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+    }
+  }
+  if (legacy.length) console.log(`ℹ️ [MongoDB] Backfilled usernameKey for ${fixed}/${legacy.length} account(s)`);
+
+  // Now that duplicates are gone, the `username` unique index can be built too
+  if (fixed) {
+    await UserModel.createIndexes().catch((err) =>
+      console.warn('⚠️ [MongoDB] username index still blocked by duplicates:', err?.message)
+    );
+  }
+}
+
+/** Mongo duplicate-key error (E11000), e.g. two sign-ups racing for the same name. */
+export function isDuplicateKeyError(err: unknown, field?: string): boolean {
+  const e = err as { code?: number; keyPattern?: Record<string, unknown> } | null;
+  return e?.code === 11000 && (!field || Boolean(e.keyPattern && field in e.keyPattern));
+}
 mongoose.connection.on('disconnected', () => {
   if (!lastMongoError) lastMongoError = 'Mất kết nối MongoDB';
   console.error('❌ [MongoDB] Disconnected');
@@ -357,8 +414,27 @@ export const dbService = {
     const cleanId = (identifier || '').trim().toLowerCase();
     if (!cleanId) return null;
     requireMongo();
-    const exact = new RegExp(`^${escapeRegex(cleanId)}$`, 'i');
-    return UserModel.findOne({ $or: [{ username: exact }, { email: exact }, { userId: cleanId }] }).lean();
+    const byKey = await UserModel.findOne({
+      $or: [{ usernameKey: usernameKey(identifier) }, { email: normalizeEmail(identifier) }, { userId: cleanId }],
+    }).lean();
+    if (byKey) return byKey;
+    // Legacy rows that could not be backfilled (case-clash): fall back to a case-insensitive match
+    const exact = new RegExp(`^${escapeRegex(normalizeUsername(identifier))}$`, 'i');
+    return UserModel.findOne({ username: exact, usernameKey: { $exists: false } }).lean();
+  },
+
+  /** True when a username (case/whitespace-insensitive) is already taken. */
+  async isUsernameTaken(username: string): Promise<boolean> {
+    requireMongo();
+    const key = usernameKey(username);
+    if (await UserModel.exists({ usernameKey: key })) return true;
+    const exact = new RegExp(`^${escapeRegex(normalizeUsername(username))}$`, 'i');
+    return Boolean(await UserModel.exists({ username: exact }));
+  },
+
+  async isEmailTaken(email: string): Promise<boolean> {
+    requireMongo();
+    return Boolean(await UserModel.exists({ email: normalizeEmail(email) }));
   },
 
   async findUserById(userId: string): Promise<any | null> {
@@ -396,8 +472,9 @@ export const dbService = {
 
     const doc = await UserModel.create({
       userId,
-      username: userData.username,
-      email: userData.email?.toLowerCase(),
+      username: normalizeUsername(userData.username),
+      usernameKey: usernameKey(userData.username),
+      email: userData.email ? normalizeEmail(userData.email) : undefined,
       passwordHash: userData.password ? hashPassword(userData.password) : undefined,
       avatar: userData.avatar || 'dog',
       title: userData.title || 'Tấm Chiếu Mới',

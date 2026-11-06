@@ -5,7 +5,14 @@ import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dbService, initMongo, verifyPassword } from './server/db.ts';
+import { dbService, initMongo, isDuplicateKeyError, verifyPassword } from './server/db.ts';
+import {
+  firstError,
+  validateEmail,
+  validateLoginIdentifier,
+  validateRegistration,
+  validateUsername,
+} from './shared/validation.ts';
 import { redis } from './server/redis.ts';
 import { isDatabaseConnectionError } from './server/errors.ts';
 
@@ -125,32 +132,37 @@ app.use('/api', (req, res, next) => {
 
 // POST /api/auth/register - Create account with salted hash and Redis session
 app.post('/api/auth/register', async (req, res) => {
-  const { username, email, password, avatar, title, drunkArchetype, declaredTolerance } = req.body;
+  const { avatar, title, drunkArchetype, declaredTolerance } = req.body;
 
-  if (!username || username.trim().length < 2) {
-    return res.status(400).json({ error: 'Biệt danh bàn nhậu phải có ít nhất 2 ký tự!' });
+  // Same rules as the sign-up form (shared/validation.ts)
+  const form = validateRegistration({
+    username: String(req.body.username ?? ''),
+    email: req.body.email ? String(req.body.email) : undefined,
+    password: String(req.body.password ?? ''),
+  });
+  if (!form.ok) {
+    return res.status(400).json({ error: firstError(form.errors), fieldErrors: form.errors });
   }
-
-  if (!password || password.length < 6) {
-    return res.status(400).json({ error: 'Mật khẩu ám hiệu phải có ít nhất 6 ký tự!' });
-  }
+  const { username, email, password } = form.value;
 
   try {
-    const existing = await dbService.findUserByIdentifier(username);
-    if (existing) {
-      return res.status(409).json({ error: 'Biệt danh này đã có bợm nhậu khác đăng ký rồi! Vui lòng chọn tên khác.' });
+    if (await dbService.isUsernameTaken(username)) {
+      return res.status(409).json({
+        error: 'Biệt danh này đã có bợm nhậu khác đăng ký rồi! Vui lòng chọn tên khác.',
+        fieldErrors: { username: 'Biệt danh đã có người dùng.' },
+      });
     }
 
-    if (email) {
-      const existingEmail = await dbService.findUserByIdentifier(email);
-      if (existingEmail) {
-        return res.status(409).json({ error: 'Email này đã gắn với một tài khoản khác!' });
-      }
+    if (email && (await dbService.isEmailTaken(email))) {
+      return res.status(409).json({
+        error: 'Email này đã gắn với một tài khoản khác!',
+        fieldErrors: { email: 'Email đã được dùng cho tài khoản khác.' },
+      });
     }
 
     const newUser = await dbService.createUser({
-      username: username.trim(),
-      email: email?.trim(),
+      username,
+      email,
       password,
       avatar: avatar || 'dog',
       title: title || 'Tấm Chiếu Mới',
@@ -184,18 +196,46 @@ app.post('/api/auth/register', async (req, res) => {
       message: 'Đăng ký thành công! Đã cấp Hộ Chiếu Tửu Lượng.',
     });
   } catch (error: any) {
+    // Lost a race with another sign-up for the same name/email: the unique index caught it
+    if (isDuplicateKeyError(error, 'usernameKey') || isDuplicateKeyError(error, 'username')) {
+      return res.status(409).json({
+        error: 'Biệt danh này vừa có người đăng ký! Vui lòng chọn tên khác.',
+        fieldErrors: { username: 'Biệt danh đã có người dùng.' },
+      });
+    }
     console.error('Registration error:', error);
     sendServerError(res, error, 'Đăng ký thất bại do lỗi hệ thống');
   }
 });
 
+// GET /api/auth/check-username?username=... — live "is this name free?" for the sign-up form
+app.get('/api/auth/check-username', async (req, res) => {
+  const check = validateUsername(String(req.query.username ?? ''));
+  if (!check.ok) return res.json({ available: false, valid: false, error: check.error });
+  try {
+    const taken = await dbService.isUsernameTaken(check.value);
+    res.json({
+      available: !taken,
+      valid: true,
+      username: check.value,
+      error: taken ? 'Biệt danh đã có người dùng.' : undefined,
+    });
+  } catch (error) {
+    sendServerError(res, error, 'Không kiểm tra được biệt danh');
+  }
+});
+
 // POST /api/auth/login - Check password hash, create Redis session token
 app.post('/api/auth/login', async (req, res) => {
-  const { identifier, password } = req.body;
-
-  if (!identifier || !password) {
-    return res.status(400).json({ error: 'Vui lòng nhập đầy đủ biệt danh/email và mật khẩu!' });
+  const { password } = req.body;
+  const idCheck = validateLoginIdentifier(String(req.body.identifier ?? ''));
+  if (!idCheck.ok) {
+    return res.status(400).json({ error: idCheck.error, fieldErrors: { identifier: idCheck.error } });
   }
+  if (!password) {
+    return res.status(400).json({ error: 'Vui lòng nhập mật khẩu!', fieldErrors: { password: 'Vui lòng nhập mật khẩu.' } });
+  }
+  const identifier = idCheck.value;
 
   try {
     const user = await dbService.findUserByIdentifier(identifier);
@@ -250,10 +290,23 @@ app.post('/api/auth/login', async (req, res) => {
 
 // POST /api/auth/guest - Instant guest access with Redis session
 app.post('/api/auth/guest', async (req, res) => {
-  const { nickname, roomPin, avatar } = req.body;
-  const guestName = (nickname || 'Khách Nhậu Chui').trim();
+  const { roomPin, avatar } = req.body;
+  const nick = validateUsername(String(req.body.nickname ?? '') || 'Khách Nhậu Chui');
+  if (!nick.ok) {
+    return res.status(400).json({ error: nick.error, fieldErrors: { nickname: nick.error } });
+  }
 
   try {
+    // Usernames are unique, so a guest gets a "#1234" tag: two "Thần Cồn Quận 4" can drink at once
+    let guestName = '';
+    for (let attempt = 0; attempt < 6 && !guestName; attempt++) {
+      const candidate = `${nick.value} #${Math.floor(1000 + Math.random() * 9000)}`;
+      if (!(await dbService.isUsernameTaken(candidate))) guestName = candidate;
+    }
+    if (!guestName) {
+      return res.status(409).json({ error: 'Biệt danh tạm này đang quá đông người dùng, thử tên khác nhé!' });
+    }
+
     const guestUser = await dbService.createUser({
       username: guestName,
       avatar: avatar || 'dog',
@@ -329,10 +382,11 @@ app.post('/api/auth/logout', async (req, res) => {
 
 // POST /api/auth/forgot-password - Recovery with cold towel humor
 app.post('/api/auth/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: 'Vui lòng cung cấp email!' });
+  const emailCheck = validateEmail(String(req.body.email ?? ''));
+  if (!emailCheck.ok) {
+    return res.status(400).json({ error: emailCheck.error, fieldErrors: { email: emailCheck.error } });
   }
+  const email = emailCheck.value;
 
   res.json({
     success: true,

@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  validateEmail,
+  validateLoginIdentifier,
+  validatePassword,
+  validateUsername,
+} from '../../shared/validation';
 import { CauVangBouncer } from './CauVangBouncer';
 import {
   Beer,
@@ -260,6 +266,44 @@ export const FUNNY_RANDOM_NAMES = [
   'Vua Lẩu Thái Tomyum'
 ];
 
+// Inline message under a form field: red error, or green confirmation
+function FieldHint({ error, okText, pending }: { error?: string; okText?: string; pending?: string }) {
+  if (error) {
+    return (
+      <p role="alert" className="mt-1 flex items-start gap-1 text-[11px] font-bold leading-snug text-rose-400">
+        <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+        <span>{error}</span>
+      </p>
+    );
+  }
+  if (pending) return <p className="mt-1 text-[11px] font-bold text-slate-400">⏳ {pending}</p>;
+  if (okText) return <p className="mt-1 text-[11px] font-bold text-emerald-400">✓ {okText}</p>;
+  return null;
+}
+
+type FieldKey =
+  | 'loginIdentifier'
+  | 'loginPassword'
+  | 'signupNickname'
+  | 'signupEmail'
+  | 'signupPassword'
+  | 'guestNickname';
+
+const TAB_FIELDS: Record<'LOGIN' | 'SIGNUP' | 'GUEST', FieldKey[]> = {
+  LOGIN: ['loginIdentifier', 'loginPassword'],
+  SIGNUP: ['signupNickname', 'signupEmail', 'signupPassword'],
+  GUEST: ['guestNickname'],
+};
+
+// Server `fieldErrors` keys → form fields
+const SERVER_FIELD_MAP: Record<'LOGIN' | 'SIGNUP' | 'GUEST', Record<string, FieldKey>> = {
+  LOGIN: { identifier: 'loginIdentifier', password: 'loginPassword' },
+  SIGNUP: { username: 'signupNickname', email: 'signupEmail', password: 'signupPassword' },
+  GUEST: { nickname: 'guestNickname' },
+};
+
+const inputTone = (hasError: boolean, base: string, ok: string) => (hasError ? `${base} border-rose-500/80 focus:border-rose-400` : `${base} ${ok}`);
+
 // ============================================================================
 // 4. MAIN AUTH PANEL MODAL COMPONENT
 // ============================================================================
@@ -302,8 +346,8 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
 
   // Sign Up State
-  const [signupNickname, setSignupNickname] = useState('Chiến Thần Bờ Kè');
-  const [signupEmail, setSignupEmail] = useState('chienthan_boke@nhau.vn');
+  const [signupNickname, setSignupNickname] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [selectedSpecies, setSelectedSpecies] = useState<SpeciesInfo>(SPECIES_LIST[0]);
   const [signupArchetype, setSignupArchetype] = useState(DRUNK_ARCHETYPES[0]);
@@ -321,6 +365,78 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
   const [authErrorMsg, setAuthErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSessionData, setLastSessionData] = useState<AuthUserSession | null>(null);
+
+  // ---- Field validation (same rules as the server: shared/validation.ts) ----
+  const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
+  const [serverErrors, setServerErrors] = useState<Partial<Record<FieldKey, string>>>({});
+  const touch = (k: FieldKey) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
+  const clearServerError = (k: FieldKey) => setServerErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
+
+  const clientErrors = useMemo(() => {
+    const e: Partial<Record<FieldKey, string>> = {};
+    const li = validateLoginIdentifier(loginIdentifier);
+    if (!li.ok) e.loginIdentifier = li.error;
+    if (!password) e.loginPassword = 'Vui lòng nhập mật khẩu.';
+    const sn = validateUsername(signupNickname);
+    if (!sn.ok) e.signupNickname = sn.error;
+    const se = validateEmail(signupEmail, { required: false });
+    if (!se.ok) e.signupEmail = se.error;
+    const sp = validatePassword(signupPassword);
+    if (!sp.ok) e.signupPassword = sp.error;
+    const gn = validateUsername(guestNickname);
+    if (!gn.ok) e.guestNickname = gn.error;
+    return e;
+  }, [loginIdentifier, password, signupNickname, signupEmail, signupPassword, guestNickname]);
+
+  const fieldError = (k: FieldKey) => serverErrors[k] || (touched[k] ? clientErrors[k] : undefined);
+
+  // Live "is this nickname free?" check while signing up (debounced)
+  const [nameCheck, setNameCheck] = useState<{ status: 'idle' | 'checking' | 'available' | 'taken' | 'error'; name: string }>({
+    status: 'idle',
+    name: '',
+  });
+  useEffect(() => {
+    if (authTab !== 'SIGNUP') return;
+    const v = validateUsername(signupNickname);
+    if (!v.ok) {
+      setNameCheck({ status: 'idle', name: '' });
+      return;
+    }
+    setNameCheck({ status: 'checking', name: v.value });
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/auth/check-username?username=${encodeURIComponent(v.value)}`, { signal: ctrl.signal });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setNameCheck({ status: data.available ? 'available' : 'taken', name: v.value });
+      } catch (err) {
+        if ((err as Error)?.name !== 'AbortError') setNameCheck({ status: 'error', name: v.value });
+      }
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [signupNickname, authTab]);
+
+  const nicknameError =
+    fieldError('signupNickname') ||
+    (nameCheck.status === 'taken' ? 'Biệt danh này đã có người dùng, chọn tên khác nhé!' : undefined);
+
+  /** Apply `fieldErrors` from a failed API call to the matching inputs. */
+  const applyServerFieldErrors = (fieldErrors?: Record<string, string>) => {
+    if (!fieldErrors) return;
+    const map = SERVER_FIELD_MAP[authTab];
+    const next: Partial<Record<FieldKey, string>> = {};
+    Object.entries(fieldErrors).forEach(([key, msg]) => {
+      if (map[key]) next[map[key]] = msg;
+    });
+    setServerErrors((prev) => ({ ...prev, ...next }));
+    if (authTab === 'SIGNUP' && fieldErrors.username) {
+      setNameCheck({ status: 'taken', name: validateUsername(signupNickname).ok ? signupNickname : '' });
+    }
+  };
 
   // Pouring logic
   useEffect(() => {
@@ -408,6 +524,21 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
     if (e) e.preventDefault();
     setAuthErrorMsg('');
 
+    // Validate this tab's fields first and point at the first problem
+    const fields = TAB_FIELDS[authTab];
+    setTouched((t) => ({ ...t, ...Object.fromEntries(fields.map((f) => [f, true])) }));
+    const firstBad = fields.find((f) => clientErrors[f] || serverErrors[f]);
+    if (firstBad) {
+      sfx.playBuzzer();
+      setAuthErrorMsg(`✍️ ${serverErrors[firstBad] || clientErrors[firstBad]}`);
+      return;
+    }
+    if (authTab === 'SIGNUP' && nameCheck.status === 'taken') {
+      sfx.playBuzzer();
+      setAuthErrorMsg('✍️ Biệt danh này đã có người dùng, chọn tên khác nhé!');
+      return;
+    }
+
     if (!ageVerified) {
       sfx.playBuzzer();
       setAuthErrorMsg('⚠️ Ê khoan! Phải tích cam kết đủ 18+ và không gọi cho Người Yêu Cũ khi say!');
@@ -432,6 +563,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
         const data = await res.json();
         if (!res.ok) {
           sfx.playBuzzer();
+          applyServerFieldErrors(data.fieldErrors);
           setAuthErrorMsg(data.error || 'Đăng nhập không thành công');
           setIsSubmitting(false);
           return;
@@ -478,6 +610,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
         const data = await res.json();
         if (!res.ok) {
           sfx.playBuzzer();
+          applyServerFieldErrors(data.fieldErrors);
           setAuthErrorMsg(data.error || 'Đăng ký thất bại');
           setIsSubmitting(false);
           return;
@@ -516,6 +649,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
         const data = await res.json();
         if (!res.ok) {
           sfx.playBuzzer();
+          applyServerFieldErrors(data.fieldErrors);
           setAuthErrorMsg(data.error || 'Không thể tạo phiên nhậu chui');
           setIsSubmitting(false);
           return;
@@ -694,10 +828,19 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                       onChange={(e) => {
                         sfx.playPop();
                         setLoginIdentifier(e.target.value);
+                        clearServerError('loginIdentifier');
                       }}
-                      placeholder="VD: cauvang_doluc@nhau.vn"
-                      className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white placeholder-slate-500 outline-none transition"
+                      onBlur={() => touch('loginIdentifier')}
+                      autoComplete="username"
+                      aria-invalid={!!fieldError('loginIdentifier')}
+                      placeholder="VD: Chiến Thần Bờ Kè hoặc ten@gmail.com"
+                      className={inputTone(
+                        !!fieldError('loginIdentifier'),
+                        'w-full bg-slate-950 border-2 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white placeholder-slate-500 outline-none transition',
+                        'border-amber-500/40 focus:border-amber-400'
+                      )}
                     />
+                    <FieldHint error={fieldError('loginIdentifier')} />
                   </div>
 
                   <div>
@@ -723,13 +866,23 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onFocus={() => setIsPasswordFocused(true)}
-                        onBlur={() => setIsPasswordFocused(false)}
+                        onBlur={() => {
+                          setIsPasswordFocused(false);
+                          touch('loginPassword');
+                        }}
                         onChange={(e) => {
                           sfx.playPop();
                           setPassword(e.target.value);
+                          clearServerError('loginPassword');
                         }}
+                        autoComplete="current-password"
+                        aria-invalid={!!fieldError('loginPassword')}
                         placeholder="Nhập ám hiệu..."
-                        className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl pl-3.5 pr-28 py-2.5 text-sm font-bold text-white outline-none transition"
+                        className={inputTone(
+                          !!fieldError('loginPassword'),
+                          'w-full bg-slate-950 border-2 rounded-xl pl-3.5 pr-28 py-2.5 text-sm font-bold text-white outline-none transition',
+                          'border-amber-500/40 focus:border-amber-400'
+                        )}
                       />
                       <button
                         type="button"
@@ -752,6 +905,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                         )}
                       </button>
                     </div>
+                    <FieldHint error={fieldError('loginPassword')} />
                   </div>
 
                   {/* Quick OAuth options */}
@@ -798,9 +952,20 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                         <input
                           type="text"
                           value={signupNickname}
-                          onChange={(e) => setSignupNickname(e.target.value)}
+                          onChange={(e) => {
+                            setSignupNickname(e.target.value);
+                            clearServerError('signupNickname');
+                          }}
+                          onBlur={() => touch('signupNickname')}
                           maxLength={22}
-                          className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                          autoComplete="username"
+                          aria-invalid={!!nicknameError}
+                          placeholder="VD: Chiến Thần Bờ Kè"
+                          className={inputTone(
+                            !!nicknameError,
+                            'w-full bg-slate-950 border-2 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder-slate-500 outline-none',
+                            nameCheck.status === 'available' ? 'border-emerald-500/70 focus:border-emerald-400' : 'border-amber-500/40 focus:border-amber-400'
+                          )}
                         />
                         <button
                           type="button"
@@ -808,6 +973,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                             sfx.playPop();
                             const pick = FUNNY_RANDOM_NAMES[Math.floor(Math.random() * FUNNY_RANDOM_NAMES.length)];
                             setSignupNickname(pick);
+                            clearServerError('signupNickname');
                           }}
                           className="px-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-300 text-xs font-black"
                           title="Random Biệt Danh Lầy Lội"
@@ -815,6 +981,11 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                           🎲
                         </button>
                       </div>
+                      <FieldHint
+                        error={nicknameError}
+                        pending={nameCheck.status === 'checking' ? 'Đang kiểm tra biệt danh…' : undefined}
+                        okText={nameCheck.status === 'available' ? 'Biệt danh còn trống!' : undefined}
+                      />
                     </div>
 
                     <div>
@@ -823,10 +994,23 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                       </label>
                       <input
                         type="email"
+                        inputMode="email"
                         value={signupEmail}
-                        onChange={(e) => setSignupEmail(e.target.value)}
-                        className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                        onChange={(e) => {
+                          setSignupEmail(e.target.value);
+                          clearServerError('signupEmail');
+                        }}
+                        onBlur={() => touch('signupEmail')}
+                        autoComplete="email"
+                        aria-invalid={!!fieldError('signupEmail')}
+                        placeholder="ten@gmail.com (không bắt buộc)"
+                        className={inputTone(
+                          !!fieldError('signupEmail'),
+                          'w-full bg-slate-950 border-2 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder-slate-500 outline-none',
+                          'border-amber-500/40 focus:border-amber-400'
+                        )}
                       />
+                      <FieldHint error={fieldError('signupEmail')} />
                     </div>
                   </div>
 
@@ -839,11 +1023,24 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                       type="password"
                       value={signupPassword}
                       onFocus={() => setIsPasswordFocused(true)}
-                      onBlur={() => setIsPasswordFocused(false)}
-                      onChange={(e) => setSignupPassword(e.target.value)}
+                      onBlur={() => {
+                        setIsPasswordFocused(false);
+                        touch('signupPassword');
+                      }}
+                      onChange={(e) => {
+                        setSignupPassword(e.target.value);
+                        clearServerError('signupPassword');
+                      }}
+                      autoComplete="new-password"
+                      aria-invalid={!!fieldError('signupPassword')}
                       placeholder="Nhập mật khẩu..."
-                      className="w-full bg-slate-950 border-2 border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none"
+                      className={inputTone(
+                        !!fieldError('signupPassword'),
+                        'w-full bg-slate-950 border-2 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none',
+                        'border-amber-500/40 focus:border-amber-400'
+                      )}
                     />
+                    <FieldHint error={fieldError('signupPassword')} />
                   </div>
 
                   {/* Character Avatar Picker */}
@@ -955,8 +1152,18 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                       <input
                         type="text"
                         value={guestNickname}
-                        onChange={(e) => setGuestNickname(e.target.value)}
-                        className="w-full bg-slate-950 border-2 border-emerald-500/50 rounded-xl px-3.5 py-2.5 text-sm font-black text-white outline-none"
+                        onChange={(e) => {
+                          setGuestNickname(e.target.value);
+                          clearServerError('guestNickname');
+                        }}
+                        onBlur={() => touch('guestNickname')}
+                        maxLength={22}
+                        aria-invalid={!!fieldError('guestNickname')}
+                        className={inputTone(
+                          !!fieldError('guestNickname'),
+                          'w-full bg-slate-950 border-2 rounded-xl px-3.5 py-2.5 text-sm font-black text-white outline-none',
+                          'border-emerald-500/50'
+                        )}
                       />
                       <button
                         type="button"
@@ -970,6 +1177,14 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                         <Dices className="w-4 h-4" /> Random Tên Bựa
                       </button>
                     </div>
+                    <FieldHint
+                      error={fieldError('guestNickname')}
+                      okText={
+                        !fieldError('guestNickname') && guestNickname.trim()
+                          ? 'Sẽ được gắn thêm mã #1234 để không trùng tên người khác'
+                          : undefined
+                      }
+                    />
                   </div>
 
                   {/* PIN Input */}
