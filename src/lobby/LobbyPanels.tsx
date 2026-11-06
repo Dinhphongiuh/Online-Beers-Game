@@ -224,12 +224,12 @@ export const JoinCodePanel: React.FC<{
         <div className="receipt-paper px-5 pt-5 pb-9 shadow-2xl">
           <CloseButton onClose={onClose} className="!bg-black/10 !text-zinc-600 hover:!text-zinc-900" />
           <div className="text-center border-b border-dashed border-zinc-400 pb-2 mb-3">
-            <div className="font-black text-lg">QUÁN NHẬU TƯ ĐỰC</div>
-            <div className="text-[10px] text-zinc-500">Bờ Kè • ĐT: 0909.DZO.DZO</div>
+            <div className="font-black text-lg">ONLINE DRINKING</div>
+            <div className="text-[10px] text-zinc-500">Nhậu vỉa hè cùng chiến hữu</div>
             <div className="text-[11px] font-bold mt-1">HÓA ĐƠN TÍNH TIỀN</div>
           </div>
           <div className="text-[11px] flex justify-between"><span>Bàn số:</span><span>??????</span></div>
-          <div className="text-[11px] flex justify-between mb-3"><span>Thu ngân:</span><span>Tư Đực</span></div>
+          <div className="text-[11px] flex justify-between mb-3"><span>Thu ngân:</span><span>Phục vụ</span></div>
 
           <label className="block text-[11px] font-bold mb-1.5">NHẬP MÃ PIN BÀN (6 SỐ):</label>
           <div
@@ -423,7 +423,7 @@ export const ProfilePanel: React.FC<{
                 <div><span className="text-white/50 text-[11px]">Nắp bia tích lũy:</span> <b>{coins} 🪙</b></div>
                 <div><span className="text-white/50 text-[11px]">Lần trốn bill thành công:</span> <b>3</b></div>
                 <div className="inline-block mt-1 px-2 py-0.5 rounded border-2 border-red-500 text-red-400 text-[10px] font-black rotate-[-4deg]">
-                  ĐÃ ĐÓNG DẤU QUÁN TƯ ĐỰC
+                  ĐÃ ĐÓNG DẤU KIỂM ĐỊNH ĐỘ LẦY
                 </div>
               </div>
             </div>

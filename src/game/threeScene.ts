@@ -416,10 +416,11 @@ export function initThreeScene(): SceneController {
     curb.position.set(0, 0.08, 4.8);
     scene.add(curb);
 
-    // Luminous Neon / Hiflex Sign in Background: "QUÁN NHẬU TƯ ĐỰC - BỜ KÈ"
+    // Luminous Neon / Hiflex Sign in Background
+    // Generic street-pub sign: the game is not any specific real pub
     const neonSign = createNeonSign(
-      'QUÁN NHẬU TƯ ĐỰC - BỜ KÈ',
-      'LẨU DÊ • HẢI SẢN TƯƠI SỐNG • BIA HƠI LẠNH BUỐT'
+      'ONLINE DRINKING • NHẬU VỈA HÈ',
+      'LẨU • HẢI SẢN TƯƠI SỐNG • BIA HƠI LẠNH BUỐT'
     );
     neonSign.position.set(0, 2.1, -3.2);
     scene.add(neonSign);

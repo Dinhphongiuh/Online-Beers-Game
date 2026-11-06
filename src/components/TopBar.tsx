@@ -95,11 +95,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         {onLogout && (
           <button
             onClick={onLogout}
-            title="Đăng xuất (rời bàn nhậu)"
+            title="Đăng xuất — rời bàn, rút êm về nhà trước khi nóc nhà gọi"
             className="bg-rose-600/20 hover:bg-rose-600 border border-rose-500/50 rounded-xl px-2.5 py-1.5 text-xs text-rose-200 hover:text-white flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-bold hidden sm:inline">Đăng Xuất</span>
+            <span className="text-[10px] font-bold hidden sm:inline">Rút Êm Về Nhà 🏃</span>
           </button>
         )}
       </div>

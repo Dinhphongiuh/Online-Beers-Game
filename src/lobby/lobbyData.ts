@@ -38,13 +38,13 @@ export interface LobbyConfig {
 }
 
 export const LOBBY_MAPS: { id: PubTheme; name: string; icon: string; desc: string }[] = [
-  { id: 'bo_ke', name: 'Quán Tư Đực Bờ Kè', icon: '🌊', desc: 'Gió sông lồng lộng, mồi hải sản tươi rói' },
+  { id: 'bo_ke', name: 'Bờ Kè Ven Sông', icon: '🌊', desc: 'Gió sông lồng lộng, mồi hải sản tươi rói' },
   { id: 'sidewalk', name: 'Ngã Tư Vỉa Hè', icon: '🛵', desc: 'Còi xe inh ỏi, ghế nhựa tràn ra lề đường' },
   { id: 'rooftop', name: 'Phòng VIP Karaoke', icon: '🎤', desc: 'Đèn chớp xanh đỏ, loa kẹo kéo hết công suất' },
 ];
 
 export const THEME_NAMES: Record<PubTheme, string> = {
-  bo_ke: 'Quán Tư Đực Bờ Kè',
+  bo_ke: 'Bờ Kè Ven Sông',
   sidewalk: 'Ngã Tư Vỉa Hè Sài Gòn',
   rooftop: 'Phòng VIP Karaoke',
 };

@@ -12,6 +12,7 @@ import {
   LobbySkin,
   TableRules,
   THEME_NAMES,
+  LOBBY_MAPS,
   buildFriendList,
   drinkingRank,
   randomRoomCode,
@@ -125,7 +126,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [bgmOn, setBgmOn] = useState(false);
   const [chat, setChat] = useState<ChatLine[]>([
-    { key: 0, who: 'Tư Đực', text: 'Bàn trống nè, ngồi đi rồi rủ anh em tới! 🪑' },
+    { key: 0, who: 'Phục vụ', text: 'Bàn trống nè, ngồi đi rồi rủ anh em tới! 🪑' },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [micTest, setMicTest] = useState(false);
@@ -483,7 +484,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   };
 
   const menuItems: { id: PanelId | 'quick'; icon: string; label: string; sub: string }[] = [
-    ...(isLoggedIn ? [] : [{ id: 'auth' as PanelId, icon: '🪪', label: 'Cổng Quán Nhậu', sub: 'Sign Up / Login' }]),
+    ...(isLoggedIn ? [] : [{ id: 'auth' as PanelId, icon: '🪪', label: 'Đăng Nhập / Đăng Ký', sub: 'Tài khoản' }]),
     { id: 'host', icon: '🔑', label: 'Tạo Bàn Riêng', sub: 'Host Room' },
     { id: 'join', icon: '🔢', label: 'Nhập Mã Bàn', sub: 'Join by Code' },
     { id: 'wardrobe', icon: '👕', label: 'Tủ Đồ Vỉa Hè', sub: 'Wardrobe' },
@@ -708,20 +709,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                 sound.playBottleOpen();
                 onLogout();
                 setName('Bợm Nhậu');
-                showToast('👋 Đã đăng xuất khỏi bàn nhậu!');
+                showToast('🏃💨 Đã rút êm về với nóc nhà! (Đăng xuất thành công)');
               }}
               className="flex items-center gap-1.5 rounded-2xl bg-rose-600/25 hover:bg-rose-600 border border-rose-500/50 px-3 py-1.5 shadow-lg backdrop-blur-md cursor-pointer text-rose-200 hover:text-white transition"
-              title="Đăng xuất"
+              title="Đăng xuất — rút êm về nhà trước khi nóc nhà gọi"
             >
               <LogOut className="w-4 h-4" />
-              <span className="text-xs font-black tracking-wide hidden sm:inline">Đăng Xuất</span>
+              <span className="text-xs font-black tracking-wide hidden sm:inline">Rút Êm Về Nhà 🏃</span>
             </button>
           ) : (
           <button
             {...sfx}
             onClick={() => openPanel('auth')}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-500/25 to-orange-500/25 border border-amber-400/60 px-3 py-1.5 shadow-lg backdrop-blur-md cursor-pointer hover:border-amber-300 text-amber-200 hover:text-white transition"
-            title="Mở Cổng Quán Nhậu: Đăng Ký, Đăng Nhập, Nhậu Chui & MongoDB Payload"
+            title="Đăng nhập, đăng ký hoặc vào nhanh không cần tài khoản"
           >
             <span className="text-base">🪪</span>
             <span className="text-xs font-black tracking-wide hidden sm:inline">
@@ -774,24 +775,23 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           hideChrome ? 'opacity-0 -translate-x-8 pointer-events-none' : ''
         } left-3 right-3 bottom-3 md:right-auto md:bottom-auto md:left-6 md:top-20 md:w-[340px]`}
       >
-        {/* Neon logo on a rusty tin plate */}
+        {/* Game logo: neon tubes on a rusty tin plate (a game brand, not any real pub) */}
         <div className="tin-sign rounded-2xl border-2 border-zinc-600 shadow-2xl px-4 py-3 mb-3 text-center relative overflow-hidden hidden md:block">
           <div className="absolute top-1.5 left-2 w-1.5 h-1.5 rounded-full bg-zinc-400/70" />
           <div className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-zinc-400/70" />
-          <div className="font-neon text-[30px] leading-none neon-tube-amber neon-flicker">TRẠM NHẬU</div>
-          <div className="mt-1 font-neon text-[15px] tracking-[0.18em] neon-tube-pink">
-            ONLINE DRINKING{' '}
-            <span key={logoFlickerKey} className="inline-block neon-flicker-fast">🍺</span>
+          <div className="font-neon text-[30px] leading-none neon-tube-amber neon-flicker">
+            ONLINE <span key={logoFlickerKey} className="inline-block neon-flicker-fast">🍺</span>
           </div>
-          <div className="text-[10px] text-zinc-400 mt-1.5 tracking-wider">QUÁN NHẬU VỈA HÈ • NHẬU TỚI BẾN</div>
+          <div className="mt-0.5 font-neon text-[26px] leading-none tracking-wide neon-tube-pink">DRINKING</div>
+          <div className="text-[10px] text-zinc-400 mt-2 tracking-[0.2em]">NHẬU VỈA HÈ • KHÔNG SAY KHÔNG VỀ</div>
         </div>
 
         {/* Laminated street-food menu card */}
         <div className="laminated-menu rounded-2xl border-4 border-amber-400/90 shadow-2xl p-3">
           <div className="md:hidden text-center mb-2 -mt-0.5">
-            <span className="font-neon text-lg neon-tube-amber neon-flicker">TRẠM NHẬU</span>{' '}
-            <span className="font-neon text-[11px] tracking-widest neon-tube-pink">
-              ONLINE DRINKING <span key={logoFlickerKey} className="inline-block neon-flicker-fast">🍺</span>
+            <span className="font-neon text-lg neon-tube-amber neon-flicker">ONLINE</span>{' '}
+            <span className="font-neon text-lg neon-tube-pink">
+              DRINKING <span key={logoFlickerKey} className="inline-block neon-flicker-fast">🍺</span>
             </span>
           </div>
           <button
@@ -807,7 +807,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <span className="relative block text-[10px] font-black text-red-900/70 tracking-widest">QUICK PLAY • GHÉP BÀN TỰ ĐỘNG</span>
           </button>
 
-          <div className="grid grid-cols-4 md:grid-cols-1 gap-1.5 mt-3">
+          <div
+            className={`grid ${menuItems.length > 4 ? 'grid-cols-5' : 'grid-cols-4'} md:grid-cols-1 gap-1.5 mt-3`}
+          >
             {menuItems.map((item) => (
               <button
                 key={item.id}
@@ -828,14 +830,30 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             ))}
           </div>
 
-          {/* Current table rules summary */}
-          <div className="mt-3 rounded-xl bg-black/30 px-3 py-2 text-[10px] text-amber-100/85 leading-relaxed hidden md:block">
-            <div>
-              📍 <b>{THEME_NAMES[map]}</b> • {speedInfo.icon} {speedInfo.name}
+          {/* Your table: where it is set up, how hard it drinks, and who hosts */}
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-2.5 hidden md:block">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-200/80">Bàn của bạn</span>
+              <span className="rounded-md bg-amber-400/90 px-1.5 py-0.5 font-mono text-[10px] font-black text-red-900">
+                #{roomCode}
+              </span>
             </div>
-            <div>
-              🪑 Bàn #{roomCode}
-              {hostName ? ` • Chủ bàn: ${hostName}` : ' • Bạn là chủ bàn'}
+            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+              <div className="rounded-lg bg-black/25 px-2 py-1.5">
+                <div className="text-[9px] font-bold uppercase text-white/45">Địa điểm</div>
+                <div className="truncate font-black text-amber-50">
+                  {LOBBY_MAPS.find((m) => m.id === map)?.icon} {THEME_NAMES[map]}
+                </div>
+              </div>
+              <div className="rounded-lg bg-black/25 px-2 py-1.5">
+                <div className="text-[9px] font-bold uppercase text-white/45">Độ đô</div>
+                <div className="truncate font-black text-amber-50">
+                  {speedInfo.icon} {speedInfo.name}
+                </div>
+              </div>
+            </div>
+            <div className="mt-1.5 text-[10px] font-bold text-amber-100/70">
+              {hostName ? `👑 Chủ bàn: ${hostName}` : '👑 Bạn là chủ bàn'} • 🪑 {squad.length + 1}/{LOBBY_SEAT_COUNT} ghế
             </div>
           </div>
         </div>

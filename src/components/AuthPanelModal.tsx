@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { CauVangBouncer } from './CauVangBouncer';
 import {
   Beer,
   KeyRound,
@@ -258,153 +259,6 @@ export const FUNNY_RANDOM_NAMES = [
   'Trùm Xúc Xắc Sài Gòn',
   'Vua Lẩu Thái Tomyum'
 ];
-
-// ============================================================================
-// 3. MASCOT BẢO VỆ CỔNG QUÁN "CẬU VÀNG" (INTERACTIVE SVG BOUNCER GUARD)
-// ============================================================================
-interface CauVangBouncerProps {
-  isPasswordFocused: boolean;
-  showPassword: boolean;
-  captchaStatus: 'IDLE' | 'POURING' | 'SUCCESS' | 'OVERFLOW';
-}
-
-function CauVangBouncerSVG({ isPasswordFocused, showPassword, captchaStatus }: CauVangBouncerProps) {
-  return (
-    <div className="relative w-28 h-28 sm:w-32 sm:h-32 mx-auto select-none">
-      {/* Hào quang đèn Neon phía sau Cậu Vàng */}
-      <div
-        className={`absolute inset-0 rounded-full blur-xl transition-all duration-500 ${
-          captchaStatus === 'OVERFLOW'
-            ? 'bg-rose-500/50 scale-110'
-            : captchaStatus === 'SUCCESS'
-            ? 'bg-emerald-400/50 scale-110'
-            : 'bg-amber-400/35'
-        }`}
-      />
-
-      <svg viewBox="0 0 200 200" className="relative z-10 w-full h-full drop-shadow-xl">
-        {/* Hai tai Cậu Vàng */}
-        <ellipse
-          cx="42"
-          cy="82"
-          rx="20"
-          ry="36"
-          transform={isPasswordFocused ? 'rotate(18 42 82)' : 'rotate(10 42 82)'}
-          fill="#d97706"
-          className="transition-all duration-300"
-        />
-        <ellipse
-          cx="158"
-          cy="82"
-          rx="20"
-          ry="36"
-          transform={isPasswordFocused ? 'rotate(-18 158 82)' : 'rotate(-10 158 82)'}
-          fill="#d97706"
-          className="transition-all duration-300"
-        />
-
-        {/* Thân mặc Áo Ba Lỗ Trắng & Dây Chuyền Vàng 9999 */}
-        <path
-          d="M 48 145 Q 100 130 152 145 L 164 195 L 36 195 Z"
-          fill="#ffffff"
-          stroke="#cbd5e1"
-          strokeWidth="3"
-        />
-        <path
-          d="M 66 150 Q 100 176 134 150"
-          fill="none"
-          stroke="#facc15"
-          strokeWidth="7"
-          strokeLinecap="round"
-          strokeDasharray="8 5"
-        />
-
-        {/* Đầu Chibi Cậu Vàng */}
-        <circle cx="100" cy="92" r="54" fill="#f59e0b" />
-        <ellipse cx="100" cy="108" rx="34" ry="25" fill="#fde68a" />
-
-        {/* Hai má hồng ngà ngà say */}
-        <ellipse cx="60" cy="102" rx="11" ry="6" fill="#f43f5e" opacity="0.55" />
-        <ellipse cx="140" cy="102" rx="11" ry="6" fill="#f43f5e" opacity="0.55" />
-
-        {/* Mắt & Kính Râm Đen Bảo Vệ Quán */}
-        {!isPasswordFocused && (
-          <g className="transition-all duration-300">
-            <rect x="54" y="66" width="38" height="22" rx="5" fill="#0f172a" stroke="#facc15" strokeWidth="2.5" />
-            <rect x="108" y="66" width="38" height="22" rx="5" fill="#0f172a" stroke="#facc15" strokeWidth="2.5" />
-            <line x1="92" y1="74" x2="108" y2="74" stroke="#facc15" strokeWidth="3" />
-            <line x1="60" y1="71" x2="74" y2="82" stroke="#38bdf8" strokeWidth="2" opacity="0.7" />
-            <line x1="114" y1="71" x2="128" y2="82" stroke="#38bdf8" strokeWidth="2" opacity="0.7" />
-          </g>
-        )}
-
-        {isPasswordFocused && (
-          <g className="transition-all duration-300">
-            {/* Mắt mở to khi người chơi bật "Hiện Mật Khẩu" để nhìn lén */}
-            <circle cx="74" cy="78" r="8" fill="#111827" />
-            <circle cx="76" cy="75" r="2.5" fill="#ffffff" />
-            <circle cx="126" cy="78" r="8" fill="#111827" />
-            <circle cx="128" cy="75" r="2.5" fill="#ffffff" />
-          </g>
-        )}
-
-        {/* Mũi & Miệng cười bựa */}
-        <ellipse cx="100" cy="98" rx="10" ry="7" fill="#1e293b" />
-        {captchaStatus === 'OVERFLOW' ? (
-          <circle cx="100" cy="118" r="9" fill="#991b1b" />
-        ) : (
-          <path
-            d="M 82 113 Q 100 128 118 113"
-            fill="none"
-            stroke="#1e293b"
-            strokeWidth="4"
-            strokeLinecap="round"
-          />
-        )}
-        <path d="M 94 120 Q 100 132 106 120 Z" fill="#fb7185" />
-
-        {/* HAI TAY CẦM LY BIA CHE MẮT KHI NHẬP PASSWORD */}
-        <g
-          style={{
-            transform: isPasswordFocused
-              ? showPassword
-                ? 'translate(0px, 14px)' // Hé ly bia xuống nhìn trộm mật khẩu!
-                : 'translate(0px, -36px)' // Đưa 2 ly bia lên che kín mắt!
-              : 'translate(0px, 32px)',
-            transition: 'transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1)',
-          }}
-        >
-          {/* Tay trái + Ly bia trái */}
-          <g transform="translate(38, 95)">
-            <rect x="0" y="0" width="34" height="42" rx="6" fill="#fef08a" stroke="#f59e0b" strokeWidth="3" />
-            <rect x="-2" y="-7" width="38" height="12" rx="6" fill="#ffffff" />
-            <circle cx="32" cy="20" r="14" fill="#d97706" />
-          </g>
-
-          {/* Tay phải + Ly bia phải */}
-          <g transform="translate(128, 95)">
-            <rect x="0" y="0" width="34" height="42" rx="6" fill="#fef08a" stroke="#f59e0b" strokeWidth="3" />
-            <rect x="-2" y="-7" width="38" height="12" rx="6" fill="#ffffff" />
-            <circle cx="2" cy="20" r="14" fill="#d97706" />
-          </g>
-        </g>
-      </svg>
-
-      {/* Bong bóng thoại nhỏ của Cậu Vàng */}
-      <div className="-mt-1 bg-slate-950/95 border border-amber-400 text-amber-200 px-2.5 py-0.5 rounded-full text-[10px] font-black text-center shadow-lg truncate max-w-[200px] mx-auto">
-        {isPasswordFocused
-          ? showPassword
-            ? '👀 Á đù! Mật khẩu dễ đoán thế!'
-            : '🙈 Cậu Vàng đã che mắt, yên tâm gõ!'
-          : captchaStatus === 'OVERFLOW'
-          ? '💦 Rót tràn bọt hết ra bàn rồi kìa!'
-          : captchaStatus === 'SUCCESS'
-          ? '🍻 Chuẩn đét! Mời đại ca vào bàn!'
-          : '🩴 Xuất trình Hộ Chiếu Tửu Lượng!'}
-      </div>
-    </div>
-  );
-}
 
 // ============================================================================
 // 4. MAIN AUTH PANEL MODAL COMPONENT
@@ -1304,7 +1158,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
                 <span>🐕 BẢO VỆ CỔNG QUÁN: CẬU VÀNG</span>
                 <span className="text-emerald-400">● ĐANG CANH CỬA</span>
               </div>
-              <CauVangBouncerSVG
+              <CauVangBouncer
                 isPasswordFocused={isPasswordFocused}
                 showPassword={showPassword}
                 captchaStatus={captchaStatus}
