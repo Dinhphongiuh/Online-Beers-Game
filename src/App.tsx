@@ -55,6 +55,29 @@ import {
   KhoaTreeAction,
 } from './components/PhiQuanMaiAnhCallHUD';
 import { OpenWorldSandboxHUD } from './components/OpenWorldSandboxHUD';
+import {
+  SurrenderBillVoteHUD,
+  SurrenderPhase,
+} from './components/SurrenderBillVoteHUD';
+import {
+  ANTI_SPAM_LOCK_MESSAGE,
+  BILL_ESCAPE_QTE_DURATION_SECONDS,
+  BillEscapeAction,
+  BillEscapeResolution,
+  BottleCapVoteEntry,
+  CALL_BILL_VOICE_LINES,
+  DIAMOND_SPONSOR_TITLE,
+  PENALTY_FULL_MUG_WARNING,
+  SURRENDER_VOTE_DURATION_SECONDS,
+  SurrenderResolutionResult,
+  areAllAwakeVotesCast,
+  canTriggerSurrenderVote,
+  createInitialBottleCapVotes,
+  decideBotSurrenderVote,
+  pickSurrenderAutoChat,
+  resolveBillEscapeQTE,
+  resolveSurrenderVote,
+} from './game/surrenderVoteLogic';
 import confetti from 'canvas-confetti';
 import { DRUNK_SPEEDS, LobbyConfig, THEME_NAMES } from './lobby/lobbyData';
 import type { GraphicsQuality } from './lobby/LobbyPanels';
@@ -90,7 +113,7 @@ export const INITIAL_PLAYERS: Player[] = [
     clothing: 'floral_shirt',
     hat: 'sunglasses',
     glassType: 'coi_glass',
-    alcoholLevel: 68, // Sát mốc 80% — chỉ cần Dzô 1-2 ly hoặc bấm nút là rút máy gọi NYC Mai Anh!
+    alcoholLevel: 76, // Đạt ngưỡng > 75% cồn (đủ điều kiện mở khóa "Em Ơi Tính Tiền!") và sát mốc 80% gọi NYC Mai Anh!
     stamina: 80,
     seatIndex: 1,
     coins: 500,
@@ -352,6 +375,42 @@ export default function App({
   const [phiQuanCallCountdown, setPhiQuanCallCountdown] = useState<number>(0);
   const [phiQuanStopProgress, setPhiQuanStopProgress] = useState<number>(0);
   const [phiQuanLastStopLog, setPhiQuanLastStopLog] = useState<string | null>(null);
+
+  // ============================================================================
+  // STATE CHO TÍNH NĂNG "EM ƠI TÍNH TIỀN!" (SURRENDER VOTE KIỂU BÀN NHẬU)
+  // ============================================================================
+  const [matchElapsedSeconds, setMatchElapsedSeconds] = useState<number>(0);
+  const [surrenderPhase, setSurrenderPhase] = useState<SurrenderPhase>('idle');
+  const [surrenderCallerId, setSurrenderCallerId] = useState<string>('user');
+  const [surrenderCountdown, setSurrenderCountdown] = useState<number>(
+    SURRENDER_VOTE_DURATION_SECONDS
+  );
+  const [surrenderVotes, setSurrenderVotes] = useState<BottleCapVoteEntry[]>([]);
+  const [surrenderVoiceLine, setSurrenderVoiceLine] = useState<string>(
+    CALL_BILL_VOICE_LINES[0]
+  );
+  const [surrenderChatFeed, setSurrenderChatFeed] = useState<
+    {
+      id: string;
+      playerName: string;
+      choice: 'yes' | 'no';
+      text: string;
+      isJumbledDrunkText: boolean;
+    }[]
+  >([]);
+  const [surrenderResolution, setSurrenderResolution] =
+    useState<SurrenderResolutionResult | null>(null);
+  const [surrenderCooldownUntilByPlayer, setSurrenderCooldownUntilByPlayer] =
+    useState<Record<string, number>>({});
+  const [nowTimestampMs, setNowTimestampMs] = useState<number>(() => Date.now());
+  const [penaltyCrateCount, setPenaltyCrateCount] = useState<number>(0);
+  const [qteCountdownSeconds, setQteCountdownSeconds] = useState<number>(
+    BILL_ESCAPE_QTE_DURATION_SECONDS
+  );
+  const [qteUserClicks, setQteUserClicks] = useState<number>(0);
+  const [qteUserAction, setQteUserAction] = useState<BillEscapeAction>('none');
+  const [qteResolution, setQteResolution] =
+    useState<BillEscapeResolution | null>(null);
 
   // Living Chaos Arena & 6 Meme Generator Systems State
   const [arenaState, setArenaState] = useState<ChaosArenaState>({
@@ -661,6 +720,8 @@ export default function App({
         }
         return { ...prev, occupantTimeLeft: prev.occupantTimeLeft - 1 };
       });
+      setMatchElapsedSeconds((prev) => prev + 1);
+      setNowTimestampMs(Date.now());
     }, 1000);
 
     return () => clearInterval(timer);
@@ -3645,6 +3706,14 @@ export default function App({
     }));
 
     // Physics Text: If player typed "!" or ALL CAPS, slam the stainless steel table "RẦM!"
+    if (
+      rawText.trim().toLowerCase() === '/tinhtien' ||
+      rawText.trim().toLowerCase() === 'tính tiền bill đi anh em ơi'
+    ) {
+      handleTriggerSurrenderBillVote(true);
+      return;
+    }
+
     if (processed.isShoutSpike) {
       sound.playTableSlam();
       setCrowdDecibel(95);
@@ -3658,6 +3727,392 @@ export default function App({
         `🗣️🍻 Rượu vào lời ra! Bạn định gõ "${processed.rawText}" nhưng miệng lại lè nhè: "${processed.displayText}"!`
       );
     }
+  };
+
+  // ============================================================================
+  // HANDLERS CHO TÍNH NĂNG "EM ƠI TÍNH TIỀN!" (SURRENDER VOTE KIỂU BÀN NHẬU)
+  // ============================================================================
+  const surrenderTriggerCheck = canTriggerSurrenderVote({
+    matchElapsedSeconds,
+    players: tableState.players,
+    callerId: userPlayer.id,
+    cooldownUntilMsByPlayer: surrenderCooldownUntilByPlayer,
+    nowMs: nowTimestampMs,
+    isVoteCurrentlyActive: surrenderPhase !== 'idle',
+  });
+
+  const finalizeSurrenderVoteOutcome = (
+    entriesToResolve: BottleCapVoteEntry[],
+    callerId: string
+  ) => {
+    const caller =
+      tableState.players.find((p) => p.id === callerId) || userPlayer;
+    const result = resolveSurrenderVote({
+      entries: entriesToResolve,
+      callerId: caller.id,
+      callerName: caller.name,
+      existingPenaltyCrates: penaltyCrateCount,
+    });
+
+    setSurrenderResolution(result);
+
+    if (result.outcome === 'REJECTED') {
+      // Kịch bản 1: BÁC BỎ! NHẬU TIẾP! + Xé đôi hóa đơn + Phạt 100% ly bia đầy tràn + Rơi két bia mới từ trên trời + Khóa nút 2 phút
+      sound.playPaperRip();
+      setTimeout(() => sound.playStampSlam(), 140);
+      setTimeout(() => sound.playCrateDropCrash(), 360);
+
+      sceneRef.current?.triggerDropPenaltyBeerCrate();
+      sceneRef.current?.setUserCupFillRatio(1.0);
+
+      const nextCrateTotal = penaltyCrateCount + 1;
+      setPenaltyCrateCount(nextCrateTotal);
+      setSurrenderPhase('rejected_torn');
+
+      // Lock caller's [🧾 GỌI TÍNH TIỀN] button for 2 minutes (120s)
+      setSurrenderCooldownUntilByPlayer((prev) => ({
+        ...prev,
+        [caller.id]: Date.now() + result.cooldownDurationSeconds * 1000,
+      }));
+      setNowTimestampMs(Date.now());
+
+      // Auto-pour 100% overflowing penalty beer mug in front of caller & apply penalty alcohol
+      setCupState((prev) => ({
+        ...prev,
+        liquidLevel: 100,
+        foamRatio: 32,
+        warmSeconds: 0,
+        pouredByName: 'Cả Bàn Phạt Tội Đòi Về Sớm',
+      }));
+
+      setTableState((prev) => ({
+        ...prev,
+        totalBill: prev.totalBill + 240000, // Thêm 1 két bia mới vào hóa đơn
+        beerTowerLevel: 100,
+        players: prev.players.map((p) => {
+          if (p.id !== caller.id) return p;
+          const nextAlc = Math.min(100, p.alcoholLevel + result.penaltyAlcGain);
+          return {
+            ...p,
+            alcoholLevel: nextAlc,
+            isPassedOut: nextAlc >= 100,
+            drinksCount: p.drinksCount + 1,
+            title: 'Tội Đồ Đòi Về Sớm 🍺',
+          };
+        }),
+      }));
+
+      showToast(
+        `🚨 ${result.headline} — "${PENALTY_FULL_MUG_WARNING}" ${caller.name} bị phạt 1 Ly Bia Đầy Tràn 100% & 1 Két Bia Mới rơi từ trên trời xuống ("RẦM!")!`
+      );
+    } else {
+      // Kịch bản 2: ĐỒNG Ý TÍNH TIỀN -> Chuyển sang 5 giây QTE "Cuộc Chiến Giành/Trốn Hóa Đơn"
+      sound.playWhistleAndBowlClink();
+      setQteCountdownSeconds(BILL_ESCAPE_QTE_DURATION_SECONDS);
+      setQteUserClicks(0);
+      setQteUserAction('none');
+      setQteResolution(null);
+      setSurrenderPhase('approved_escape_qte');
+      showToast(
+        '😗🎵 Huýt sáo gọi chủ quán thành công! 5 GIÂY CUỐI: Mau bấm [🏃 Đi Vệ Sinh] hoặc [👟 Buộc Dây Giày] để trốn tờ hóa đơn!'
+      );
+    }
+  };
+
+  const handleTriggerSurrenderBillVote = (forceBypass = false) => {
+    sceneRef.current?.releasePointerLock();
+
+    if (surrenderPhase !== 'idle') {
+      showToast('🧾 Tờ Hóa Đơn Định Mệnh đang mở ở góc phải màn hình!');
+      return;
+    }
+
+    const check = canTriggerSurrenderVote({
+      matchElapsedSeconds,
+      players: tableState.players,
+      callerId: userPlayer.id,
+      cooldownUntilMsByPlayer: surrenderCooldownUntilByPlayer,
+      nowMs: Date.now(),
+      isVoteCurrentlyActive: false,
+      forceBypassCondition: forceBypass,
+    });
+
+    if (!check.canTrigger) {
+      sound.playSlap();
+      showToast(`🚫 ${check.message || ANTI_SPAM_LOCK_MESSAGE}`);
+      return;
+    }
+
+    // 1. Trigger 3D Air-Signing Bill Gesture + Dramatic Audio & Voice-Line
+    const chosenVoiceLine =
+      CALL_BILL_VOICE_LINES[
+        Math.floor(Math.random() * CALL_BILL_VOICE_LINES.length)
+      ];
+    sound.playCallBillDramatic();
+    sceneRef.current?.triggerAirSignBill(userPlayer.id);
+
+    setActiveChatBubble({
+      rawText: '/tinhtien',
+      displayText: `🧾✍️ "${chosenVoiceLine}"`,
+      bubbleStyle: userPlayer.alcoholLevel > 60 ? 'WOBBLE_DRUNK' : 'NORMAL',
+      isShoutSpike: true,
+      wasKeywordMutated: false,
+    });
+
+    const initialEntries = createInitialBottleCapVotes(
+      tableState.players,
+      userPlayer.id,
+      true
+    );
+
+    setSurrenderCallerId(userPlayer.id);
+    setSurrenderVoiceLine(chosenVoiceLine);
+    setSurrenderVotes(initialEntries);
+    setSurrenderChatFeed([]);
+    setSurrenderResolution(null);
+    setSurrenderCountdown(SURRENDER_VOTE_DURATION_SECONDS);
+    setSurrenderPhase('voting');
+
+    showToast(
+      `🧾✍️ ${userPlayer.name} đứng phắt dậy ký tên vào không khí: "${chosenVoiceLine}" — Bỏ phiếu trên Tờ Hóa Đơn Định Mệnh (15s)!`
+    );
+  };
+
+  const applyPlayerSurrenderVote = (
+    playerId: string,
+    choice: 'yes' | 'no',
+    wasDrunkMisclick = false
+  ) => {
+    const voter =
+      tableState.players.find((p) => p.id === playerId) || userPlayer;
+    if (voter.isPassedOut || voter.alcoholLevel >= 100) return;
+
+    const quote = pickSurrenderAutoChat(choice);
+    if (choice === 'no') {
+      sound.playTableSlam();
+    } else {
+      sound.playGulp();
+    }
+
+    sceneRef.current?.triggerVoteReaction3D(playerId, choice);
+
+    // Show overhead speech bubble for the voter
+    setActiveChatBubble({
+      rawText: choice === 'yes' ? '🏳️ Thôi Về Nghỉ' : '🍺 Tao Chưa Say!',
+      displayText: `${voter.name}: "${quote.text}"`,
+      bubbleStyle: quote.isJumbledDrunkText
+        ? 'BROKEN_SLUR'
+        : choice === 'no'
+        ? 'WOBBLE_DRUNK'
+        : 'TIPS_BUBBLE',
+      isShoutSpike: choice === 'no',
+      wasKeywordMutated: wasDrunkMisclick,
+    });
+
+    if (wasDrunkMisclick && voter.isUser) {
+      showToast(
+        '🥴🔀 TAY NHANH HƠN NÃO (>85% Cồn)! Hai nút bơi loạn xạ nên bạn bấm nhầm sang [🍺 Tao Chưa Say!] luôn!'
+      );
+    }
+
+    setSurrenderChatFeed((prev) => [
+      {
+        id: `${playerId}-${Date.now()}-${Math.random()}`,
+        playerName: voter.name,
+        choice,
+        text: quote.text,
+        isJumbledDrunkText: quote.isJumbledDrunkText,
+      },
+      ...prev.slice(0, 7),
+    ]);
+
+    setSurrenderVotes((prev) => {
+      const updated = prev.map((entry) =>
+        entry.playerId === playerId
+          ? {
+              ...entry,
+              status: choice,
+              autoChatLine: quote.text,
+              isJumbledDrunkText: quote.isJumbledDrunkText,
+              votedAtMs: Date.now(),
+            }
+          : entry
+      );
+
+      if (areAllAwakeVotesCast(updated)) {
+        setTimeout(() => {
+          finalizeSurrenderVoteOutcome(updated, surrenderCallerId);
+        }, 450);
+      }
+
+      return updated;
+    });
+  };
+
+  // Force Scenario 1 (Reject & Penalty) or Scenario 2 (Approve & 5s Escape QTE)
+  const handleForceSurrenderScenario = (
+    mode: 'force_reject' | 'force_approve'
+  ) => {
+    const targetChoice: 'yes' | 'no' =
+      mode === 'force_approve' ? 'yes' : 'no';
+    const forcedEntries: BottleCapVoteEntry[] = surrenderVotes.map(
+      (entry, idx) => {
+        if (entry.status === 'passed_out' || entry.alcoholLevel >= 100) {
+          return entry;
+        }
+        const quote = pickSurrenderAutoChat(targetChoice, idx);
+        return {
+          ...entry,
+          status: targetChoice,
+          autoChatLine: quote.text,
+          isJumbledDrunkText: quote.isJumbledDrunkText,
+          votedAtMs: Date.now(),
+        };
+      }
+    );
+
+    const sampleQuote = pickSurrenderAutoChat(targetChoice, 0);
+    setSurrenderChatFeed((prev) => [
+      {
+        id: `force-${Date.now()}`,
+        playerName: 'Cả Bàn Nhậu',
+        choice: targetChoice,
+        text: sampleQuote.text,
+        isJumbledDrunkText: sampleQuote.isJumbledDrunkText,
+      },
+      ...prev,
+    ]);
+    setSurrenderVotes(forcedEntries);
+    sceneRef.current?.triggerVoteReaction3D(userPlayer.id, targetChoice);
+    finalizeSurrenderVoteOutcome(forcedEntries, surrenderCallerId);
+  };
+
+  // 15-Second Countdown & Staggered AI Bot Voting while in 'voting' phase
+  useEffect(() => {
+    if (surrenderPhase !== 'voting') return;
+
+    const timer = setInterval(() => {
+      setSurrenderCountdown((prev) => {
+        const nextSec = prev - 1;
+
+        // Have 1 pending AI bot cast a vote at seconds 13, 11, 9, 7
+        if ([13, 11, 9, 7].includes(nextSec)) {
+          setSurrenderVotes((currentEntries) => {
+            const pendingBotEntry = currentEntries.find(
+              (e) => !e.isUser && e.status === 'pending'
+            );
+            if (!pendingBotEntry) return currentEntries;
+
+            const botPlayer = tableState.players.find(
+              (p) => p.id === pendingBotEntry.playerId
+            );
+            if (!botPlayer) return currentEntries;
+
+            const botDecision = decideBotSurrenderVote(botPlayer, 'natural');
+            if (botDecision === 'passed_out') {
+              return currentEntries.map((e) =>
+                e.playerId === botPlayer.id ? { ...e, status: 'passed_out' } : e
+              );
+            }
+
+            const quote = pickSurrenderAutoChat(botDecision);
+            if (botDecision === 'no') {
+              sound.playTableSlam();
+            } else {
+              sound.playChopstickClack();
+            }
+            sceneRef.current?.triggerVoteReaction3D(botPlayer.id, botDecision);
+
+            setSurrenderChatFeed((feed) => [
+              {
+                id: `${botPlayer.id}-${Date.now()}`,
+                playerName: botPlayer.name,
+                choice: botDecision,
+                text: quote.text,
+                isJumbledDrunkText: quote.isJumbledDrunkText,
+              },
+              ...feed.slice(0, 7),
+            ]);
+
+            const updated = currentEntries.map((e) =>
+              e.playerId === botPlayer.id
+                ? {
+                    ...e,
+                    status: botDecision,
+                    autoChatLine: quote.text,
+                    isJumbledDrunkText: quote.isJumbledDrunkText,
+                    votedAtMs: Date.now(),
+                  }
+                : e
+            );
+
+            if (areAllAwakeVotesCast(updated)) {
+              setTimeout(() => {
+                finalizeSurrenderVoteOutcome(updated, surrenderCallerId);
+              }, 450);
+            }
+
+            return updated;
+          });
+        }
+
+        if (nextSec <= 0) {
+          setSurrenderVotes((finalEntries) => {
+            setTimeout(() => {
+              finalizeSurrenderVoteOutcome(finalEntries, surrenderCallerId);
+            }, 50);
+            return finalEntries;
+          });
+          return 0;
+        }
+
+        return nextSec;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [surrenderPhase, surrenderCallerId, penaltyCrateCount]);
+
+  // 5-Second Countdown for Scenario 2 QTE: "Cuộc Chiến Giành/Trốn Hóa Đơn"
+  useEffect(() => {
+    if (surrenderPhase !== 'approved_escape_qte') return;
+
+    const timer = setInterval(() => {
+      setQteCountdownSeconds((prev) => {
+        if (prev <= 1) {
+          sound.playStampSlam();
+          confetti({ particleCount: 75, spread: 85, origin: { y: 0.55 } });
+          const finalQte = resolveBillEscapeQTE({
+            players: tableState.players,
+            userEscapeClicks: qteUserClicks,
+            userEscapeAction: qteUserAction,
+          });
+          setQteResolution(finalQte);
+          setSurrenderPhase('summary_diamond_sponsor');
+
+          // Award the victim the title "Nhà Tài Trợ Kim Cương (Nạn Nhân Trả Bill)"
+          setTableState((ts) => ({
+            ...ts,
+            players: ts.players.map((p) =>
+              p.id === finalQte.victim.playerId
+                ? { ...p, title: DIAMOND_SPONSOR_TITLE }
+                : p
+            ),
+          }));
+          showToast(finalQte.summaryHeadline);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [surrenderPhase, qteUserClicks, qteUserAction, tableState.players]);
+
+  const handleMashEscapeQTE = (action: 'run_wc' | 'tie_shoelace') => {
+    sound.playChopstickClack();
+    setQteUserAction(action);
+    setQteUserClicks((prev) => prev + 1);
   };
 
   const handleTriggerDrunkSubtitle = (original: string, translated: string) => {
@@ -4450,6 +4905,45 @@ export default function App({
         />
       )}
 
+      {/* "Em Ơi Tính Tiền!" (Surrender Vote kiểu Bàn Nhậu) Right-Side Receipt Tray & 5s Escape Bill QTE */}
+      <SurrenderBillVoteHUD
+        phase={surrenderPhase}
+        callerPlayer={
+          tableState.players.find((p) => p.id === surrenderCallerId) ||
+          userPlayer
+        }
+        userPlayer={userPlayer}
+        totalBill={tableState.totalBill}
+        countdownSeconds={surrenderCountdown}
+        qteCountdownSeconds={qteCountdownSeconds}
+        voteEntries={surrenderVotes}
+        triggerVoiceLine={surrenderVoiceLine}
+        chatFeed={surrenderChatFeed}
+        resolution={surrenderResolution}
+        qteUserClicks={qteUserClicks}
+        qteUserAction={qteUserAction}
+        qteResolution={qteResolution}
+        penaltyCrateCount={penaltyCrateCount}
+        onCastUserVote={(choice, wasDrunkMisclick) =>
+          applyPlayerSurrenderVote(userPlayer.id, choice, wasDrunkMisclick)
+        }
+        onForceScenario={handleForceSurrenderScenario}
+        onMashEscapeQTE={handleMashEscapeQTE}
+        onBoostUserDrunk88ForTest={() => {
+          sound.playGulp();
+          setTableState((prev) => ({
+            ...prev,
+            players: prev.players.map((p) =>
+              p.isUser ? { ...p, alcoholLevel: 88, isPassedOut: false } : p
+            ),
+          }));
+          showToast(
+            '🥴 Đã nâng độ cồn của bạn lên 88% (>85%) — Kích hoạt "Tay Nhanh Hơn Não" (2 nút tự bơi & đổi chỗ)!'
+          );
+        }}
+        onCloseOrContinueParty={() => setSurrenderPhase('idle')}
+      />
+
       {/* Unified Collapsible Bottom Dock (Zero Viewport Occlusion) */}
       <BottomDock
         userPlayer={userPlayer}
@@ -4464,6 +4958,12 @@ export default function App({
           arenaState.urbanPatrolActive ||
           arenaState.exCallQTEActive ||
           arenaState.wifeCallActive
+        }
+        isSurrenderVoteActive={surrenderPhase !== 'idle'}
+        surrenderCooldownSeconds={surrenderTriggerCheck.cooldownRemainingSeconds}
+        isSurrenderConditionMet={
+          surrenderTriggerCheck.conditionSummary.isTimeMet ||
+          surrenderTriggerCheck.conditionSummary.isAlcoholMet
         }
         onCheers={handleCheersWithTableRules}
         onToggleMic={handleToggleMic}
@@ -4486,6 +4986,7 @@ export default function App({
         onGoToToilet={handleEnterToilet}
         onSelectMinigame={handleSelectMinigame}
         onOpenShop={() => setActiveModal('shop')}
+        onTriggerSurrenderBillVote={() => handleTriggerSurrenderBillVote(false)}
       />
     </div>
   );

@@ -9,8 +9,33 @@ type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 
 /** Shows the 3D lobby first, then swaps to the match behind a beer-foam wipe. */
 export default function Root() {
-  const [phase, setPhase] = useState<Phase>('menu');
-  const [config, setConfig] = useState<LobbyConfig | null>(null);
+  const isAutostart =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('autostart') === '1';
+
+  const [phase, setPhase] = useState<Phase>(isAutostart ? 'game' : 'menu');
+  const [config, setConfig] = useState<LobbyConfig | null>(() =>
+    isAutostart
+      ? {
+          playerName: INITIAL_PLAYERS[0].name,
+          skin: {
+            avatar: INITIAL_PLAYERS[0].avatar,
+            clothing: INITIAL_PLAYERS[0].clothing,
+            hat: INITIAL_PLAYERS[0].hat,
+            glassType: INITIAL_PLAYERS[0].glassType,
+          },
+          squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
+          roomCode: '4089',
+          theme: 'sidewalk',
+          drunkSpeed: 'toi_ben',
+          rules: {
+            micDzo: false,
+            randomEvents: false,
+            billBrawl: true,
+          },
+        }
+      : null
+  );
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [userSession, setUserSession] = useState<AuthUserSession | null>(null);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);

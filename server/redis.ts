@@ -77,14 +77,14 @@ function createTcpDriver(url: string): RedisDriver {
 function createRestDriver(url: string, token: string): RedisDriver {
   // Keep values as raw strings: callers JSON.parse what they stored themselves
   const client = new UpstashRedis({ url, token, automaticDeserialization: false });
-  let ready = false;
+  let ready = true; // Stateless HTTP: assume ready once configured until a command or ping fails
 
-  // REST is stateless, so "connected" means the last health ping succeeded.
-  // Ping every 5s while down, every 60s while up (Upstash bills per command).
+  // Ping immediately and periodically to verify credentials & connectivity
   const ping = async () => {
     try {
       await client.ping();
-      if (!ready) console.log('✅ [Redis] Connected (Upstash REST)');
+      if (!ready) console.log('✅ [Redis] Reconnected (Upstash REST)');
+      else console.log('✅ [Redis] Connected (Upstash REST)');
       ready = true;
       lastRedisError = '';
     } catch (err: any) {
@@ -93,12 +93,15 @@ function createRestDriver(url: string, token: string): RedisDriver {
     }
     setTimeout(ping, ready ? 60000 : 5000).unref();
   };
-  ping();
+  void ping();
 
   // A failed command also marks the connection down until the next good ping
   const track = async <T,>(p: Promise<T>): Promise<T> => {
     try {
-      return await p;
+      const res = await p;
+      ready = true;
+      lastRedisError = '';
+      return res;
     } catch (err: any) {
       ready = false;
       logError(err?.message || 'Upstash REST request failed');
@@ -118,17 +121,30 @@ function createRestDriver(url: string, token: string): RedisDriver {
   };
 }
 
-if (redisUrl) {
-  if (isValidRedisUrl(redisUrl)) {
-    lastRedisError = 'Đang kết nối…';
-    driver = createTcpDriver(redisUrl);
-  } else {
-    // e.g. a pasted "redis-cli --tls -u ..." command: report it instead of crashing the server
-    logError('REDIS_URL không hợp lệ (phải có dạng redis:// hoặc rediss://user:pass@host:port)');
-  }
-} else if (restUrl && restToken) {
+// Extract redis:// or rediss:// URL if user pasted a full `redis-cli -u ...` command or wrapped in quotes
+function sanitizeRedisUrl(raw?: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim().replace(/^['"]|['"]$/g, '');
+  const match = trimmed.match(/rediss?:\/\/[^\s'"]+/i);
+  return match ? match[0] : trimmed;
+}
+
+const cleanRedisUrl = sanitizeRedisUrl(redisUrl);
+
+if (cleanRedisUrl && isValidRedisUrl(cleanRedisUrl)) {
   lastRedisError = 'Đang kết nối…';
-  driver = createRestDriver(restUrl, restToken);
+  driver = createTcpDriver(cleanRedisUrl);
+} else if (restUrl && restToken) {
+  if (redisUrl && !isValidRedisUrl(cleanRedisUrl)) {
+    console.warn(
+      `⚠️ [Redis] Bỏ qua REDIS_URL không hợp lệ ("${redisUrl}"), tự động dùng UPSTASH_REDIS_REST_URL.`
+    );
+  }
+  lastRedisError = '';
+  driver = createRestDriver(restUrl.trim(), restToken.trim());
+} else if (redisUrl) {
+  // e.g. a single character "m" or invalid string when Upstash REST is not configured
+  logError('REDIS_URL không hợp lệ (phải có dạng redis:// hoặc rediss://user:pass@host:port)');
 } else {
   logError('Chưa cấu hình REDIS_URL hoặc UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN');
 }

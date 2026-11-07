@@ -80,6 +80,9 @@ export interface SceneController {
   triggerTreeShake: () => void;
   triggerPushFoodCartCrash: () => void;
   triggerFlipNeighborTable: () => void;
+  triggerAirSignBill: (playerId: string) => void;
+  triggerVoteReaction3D: (playerId: string, vote: 'yes' | 'no') => void;
+  triggerDropPenaltyBeerCrate: () => void;
   setYellowPeePuddleActive: (active: boolean) => void;
   setRainAndTarp: (raining: boolean, tarpPulled: boolean) => void;
   setKaraokeSpeakerActive: (active: boolean) => void;
@@ -311,6 +314,15 @@ export function initThreeScene(): SceneController {
   let isCheersing = false;
   let cheersTimer = 0;
   let slowMoTimer = 0; // 0.55s slow-motion zoom when clinking glasses
+  let tableSlamJoltTimer = 0; // Table & dishes bounce when someone votes "Tao Chưa Say!"
+  const airSignBillTimers = new Map<string, number>();
+  const voteReactionTimers = new Map<string, { vote: 'yes' | 'no'; timer: number }>();
+  const fallingPenaltyCrates: {
+    group: THREE.Group;
+    targetY: number;
+    velY: number;
+    bounced: boolean;
+  }[] = [];
   let currentMinigame: MinigameId = 'none';
   let bottleSpinSpeed = 0;
   let bottleAngle = 0;
@@ -1308,10 +1320,57 @@ export function initThreeScene(): SceneController {
         if (tableGroup) {
           tableGroup.rotation.z = Math.sin(time * 28) * 0.012;
         }
-      } else if (tableGroup) {
+      } else if (tableGroup && tableSlamJoltTimer <= 0) {
         tableGroup.rotation.z = 0;
+        tableGroup.position.y = 0;
       }
     }
+
+    // Animate Table Slam Jolt & Dishes Bouncing when voting [🍺 Tao Chưa Say!]
+    if (tableSlamJoltTimer > 0) {
+      tableSlamJoltTimer = Math.max(0, tableSlamJoltTimer - rawDelta);
+      const joltWave = Math.abs(Math.sin(time * 38)) * (tableSlamJoltTimer / 0.85);
+      if (tableGroup) {
+        tableGroup.position.y = joltWave * 0.045;
+        tableGroup.rotation.z = Math.sin(time * 44) * 0.025 * (tableSlamJoltTimer / 0.85);
+      }
+      foodPlattersMap.forEach((platter, idx) => {
+        const basePos = DISH_POSITIONS[idx] || [0, 0.98, 0];
+        platter.position.y = (basePos[1] || 0.98) + joltWave * 0.085;
+      });
+    }
+
+    // Animate Penalty Red Plastic Beer Crates dropping from the sky ("RẦM!")
+    for (const crateItem of fallingPenaltyCrates) {
+      if (crateItem.group.position.y > crateItem.targetY || crateItem.velY > 0) {
+        crateItem.velY -= 18.5 * rawDelta;
+        crateItem.group.position.y += crateItem.velY * rawDelta;
+        if (crateItem.group.position.y <= crateItem.targetY) {
+          crateItem.group.position.y = crateItem.targetY;
+          if (!crateItem.bounced && Math.abs(crateItem.velY) > 1.5) {
+            crateItem.bounced = true;
+            crateItem.velY = Math.abs(crateItem.velY) * 0.28;
+            burstFoam(
+              crateItem.group.position.x,
+              crateItem.targetY + 0.25,
+              crateItem.group.position.z
+            );
+          } else {
+            crateItem.velY = 0;
+          }
+        }
+      }
+    }
+
+    // Decrement per-player Air-Sign Bill & Surrender Vote Reaction timers
+    airSignBillTimers.forEach((rem, pid) => {
+      if (rem <= rawDelta) airSignBillTimers.delete(pid);
+      else airSignBillTimers.set(pid, rem - rawDelta);
+    });
+    voteReactionTimers.forEach((entry, pid) => {
+      if (entry.timer <= rawDelta) voteReactionTimers.delete(pid);
+      else entry.timer -= rawDelta;
+    });
 
     // Animate Rainbow Puddle pulse & Karaoke Stage 2 Disco Strobe Lights
     if (rainbowPuddleGroup && rainbowPuddleGroup.visible) {
@@ -1624,6 +1683,9 @@ export function initThreeScene(): SceneController {
         isHeartbrokenMaiAnh?: boolean;
         isClimbingTree?: boolean;
         isWalkingToTree?: boolean;
+        isAirSigningBill?: boolean;
+        isSlammingTableNo?: boolean;
+        isSlumpingYes?: boolean;
       } = {
         bladderLevel: player.bladderLevel || 0,
         isBreathingFire: player.isBreathingFire,
@@ -1639,6 +1701,9 @@ export function initThreeScene(): SceneController {
         isHeartbrokenMaiAnh: player.isHeartbrokenMaiAnh,
         isClimbingTree: false,
         isWalkingToTree: false,
+        isAirSigningBill: (airSignBillTimers.get(player.id) || 0) > 0,
+        isSlammingTableNo: voteReactionTimers.get(player.id)?.vote === 'no',
+        isSlumpingYes: voteReactionTimers.get(player.id)?.vote === 'yes',
       };
 
       if (lobbyMode !== 'off') {
@@ -2403,6 +2468,89 @@ export function initThreeScene(): SceneController {
     triggerFlipNeighborTable: () => {
       neighborTableFlipTimer = 4.0;
       burstFoam(3.2, 1.15, 0.35);
+    },
+
+    triggerAirSignBill: (playerId: string) => {
+      airSignBillTimers.set(playerId, 4.5);
+    },
+
+    triggerVoteReaction3D: (playerId: string, vote: 'yes' | 'no') => {
+      voteReactionTimers.set(playerId, { vote, timer: 3.2 });
+      if (vote === 'no') {
+        tableSlamJoltTimer = 0.85;
+        burstFoam(0, 1.08, 0);
+      }
+    },
+
+    triggerDropPenaltyBeerCrate: () => {
+      if (!scene) return;
+      const crateGroup = new THREE.Group();
+      const plasticMat = new THREE.MeshStandardMaterial({
+        color: 0xdc2626, // Red Tiger/Sài Gòn plastic crate
+        roughness: 0.55,
+      });
+      const boxMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.32, 0.34),
+        plasticMat
+      );
+      boxMesh.position.y = 0.16;
+      boxMesh.castShadow = true;
+      boxMesh.receiveShadow = true;
+      crateGroup.add(boxMesh);
+
+      // Gold band & 6 green glass beer bottles sticking out of the crate
+      const bandMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.47, 0.07, 0.35),
+        new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4 })
+      );
+      bandMesh.position.y = 0.18;
+      crateGroup.add(bandMesh);
+
+      const bottleMat = new THREE.MeshStandardMaterial({
+        color: 0x15803d,
+        roughness: 0.15,
+        metalness: 0.25,
+      });
+      const capMat = new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        metalness: 0.8,
+        roughness: 0.2,
+      });
+      for (let bx = -1; bx <= 1; bx++) {
+        for (let bz = -0.5; bz <= 0.5; bz += 1) {
+          const bottle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.025, 0.035, 0.18, 10),
+            bottleMat
+          );
+          bottle.position.set(bx * 0.12, 0.34, bz * 0.12);
+          crateGroup.add(bottle);
+
+          const cap = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.026, 0.026, 0.015, 10),
+            capMat
+          );
+          cap.position.set(bx * 0.12, 0.435, bz * 0.12);
+          crateGroup.add(cap);
+        }
+      }
+
+      const stackIdx = fallingPenaltyCrates.length;
+      const col = stackIdx % 2;
+      const layer = Math.floor(stackIdx / 2);
+      const dropX = 1.28 + col * 0.52;
+      const dropZ = 1.05 - col * 0.25;
+      const targetY = layer * 0.33;
+
+      crateGroup.position.set(dropX, 5.8 + layer * 0.5, dropZ);
+      crateGroup.rotation.y = (stackIdx * 0.35) % 0.8;
+      scene.add(crateGroup);
+
+      fallingPenaltyCrates.push({
+        group: crateGroup,
+        targetY,
+        velY: -2.5,
+        bounced: false,
+      });
     },
 
     setYellowPeePuddleActive: (active: boolean) => {

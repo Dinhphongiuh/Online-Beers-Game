@@ -44,6 +44,9 @@ export interface CharacterRig {
       isHeartbrokenMaiAnh?: boolean;
       isClimbingTree?: boolean;
       isWalkingToTree?: boolean;
+      isAirSigningBill?: boolean;
+      isSlammingTableNo?: boolean;
+      isSlumpingYes?: boolean;
     }
   ) => void;
   setDoodles: (doodles: string[]) => void;
@@ -715,6 +718,9 @@ export function createChibiCharacter(
       isHeartbrokenMaiAnh?: boolean;
       isClimbingTree?: boolean;
       isWalkingToTree?: boolean;
+      isAirSigningBill?: boolean;
+      isSlammingTableNo?: boolean;
+      isSlumpingYes?: boolean;
     }
   ) => {
     animTimer += delta;
@@ -841,6 +847,59 @@ export function createChibiCharacter(
       leftLeg.rotation.x = Math.PI / 3 + Math.sin(climbCycle) * 0.58;
       rightLeg.rotation.x = Math.PI / 3 - Math.sin(climbCycle) * 0.58;
       jaw.scale.set(1.3, 1.15 + Math.abs(Math.sin(animTimer * 14)) * 0.95, 1.0);
+      return;
+    }
+
+    // 0h-1. Pha "Múa Tay Gọi Bill" (isAirSigningBill): Đứng phắt dậy / vịn mép bàn, giơ cao 1 tay lên trời "ký tên vào không khí"!
+    if (extraState?.isAirSigningBill) {
+      body.position.y = THREE.MathUtils.damp(body.position.y, 0.72, 10, delta);
+      body.position.z = THREE.MathUtils.damp(body.position.z, 0.24, 10, delta);
+      body.rotation.x = THREE.MathUtils.damp(body.rotation.x, 0.16, 8, delta);
+      body.rotation.z = Math.sin(animTimer * 6) * 0.08;
+      // Legs straight down standing up from the plastic stool
+      leftLeg.rotation.x = THREE.MathUtils.damp(leftLeg.rotation.x, Math.PI / 2, 10, delta);
+      rightLeg.rotation.x = THREE.MathUtils.damp(rightLeg.rotation.x, Math.PI / 2, 10, delta);
+      // Left hand leans on the edge of the stainless steel table
+      leftArm.rotation.set(1.25, 0.18, 0.28);
+      // Right hand raised high in the sky scribbling a signature in the air!
+      const signWaveX = Math.sin(animTimer * 18) * 0.35;
+      const signWaveZ = Math.cos(animTimer * 12) * 0.28;
+      rightArm.position.set(0.26, 0.48, 0.08);
+      rightArm.rotation.set(2.85 + signWaveX, -0.25, -0.2 + signWaveZ);
+      head.rotation.x = -0.28;
+      head.rotation.y = Math.sin(animTimer * 7) * 0.25;
+      jaw.scale.set(1.35, 1.4 + Math.abs(Math.sin(animTimer * 16)) * 0.9, 1.1);
+      return;
+    }
+
+    // 0h-2. Phiếu Chiến Tiếp [🍺 Tao Chưa Say!] (isSlammingTableNo): Đập mạnh tay xuống bàn inox + chỉ thẳng mặt kẻ đòi về!
+    if (extraState?.isSlammingTableNo) {
+      const slamCycle = Math.abs(Math.sin(animTimer * 20));
+      body.position.y = 0.62 + slamCycle * 0.06;
+      body.position.z = 0.28;
+      body.rotation.x = 0.28;
+      body.rotation.z = Math.sin(animTimer * 14) * 0.12;
+      // Left arm slams rapidly onto the stainless steel table
+      leftArm.rotation.set(1.15 + Math.sin(animTimer * 24) * 0.55, 0.15, 0.22);
+      // Right arm points straight forward at the bill caller's face
+      rightArm.position.set(0.24, 0.42, 0.22);
+      rightArm.rotation.set(1.62, -0.15, -0.08 + Math.sin(animTimer * 18) * 0.08);
+      head.rotation.x = -0.15;
+      head.rotation.y = Math.sin(animTimer * 10) * 0.18;
+      jaw.scale.set(1.4, 1.7 + slamCycle * 0.8, 1.15);
+      return;
+    }
+
+    // 0h-3. Phiếu Đầu Hàng [🏳️ Thôi Về Nghỉ] (isSlumpingYes): Gục đầu xuống bàn hoặc ôm bụng xin về
+    if (extraState?.isSlumpingYes) {
+      body.position.y = THREE.MathUtils.damp(body.position.y, 0.46, 8, delta);
+      body.position.z = THREE.MathUtils.damp(body.position.z, 0.22, 8, delta);
+      body.rotation.x = THREE.MathUtils.damp(body.rotation.x, 0.85, 8, delta);
+      head.rotation.x = 0.38 + Math.sin(animTimer * 8) * 0.08;
+      // Hands holding stomach / pleading
+      leftArm.rotation.set(1.15, 0.55, 0.45);
+      rightArm.rotation.set(1.15, -0.55, -0.45);
+      jaw.scale.set(1.1, 0.8, 1.0);
       return;
     }
 

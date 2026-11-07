@@ -13,6 +13,8 @@ import {
   Bath,
   Sparkles,
   Flame,
+  Receipt,
+  Lock,
 } from 'lucide-react';
 
 interface BottomDockProps {
@@ -24,6 +26,9 @@ interface BottomDockProps {
   isDrinkModalOpen?: boolean;
   isChaosArenaOpen?: boolean;
   hasUrgentArenaEvent?: boolean;
+  isSurrenderVoteActive?: boolean;
+  surrenderCooldownSeconds?: number;
+  isSurrenderConditionMet?: boolean;
   onCheers: () => void;
   onToggleMic: () => void;
   onOpenFoodModal: () => void;
@@ -33,6 +38,7 @@ interface BottomDockProps {
   onGoToToilet: () => void;
   onSelectMinigame: (minigame: MinigameId) => void;
   onOpenShop: () => void;
+  onTriggerSurrenderBillVote: () => void;
 }
 
 export const BottomDock: React.FC<BottomDockProps> = ({
@@ -44,6 +50,9 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   isDrinkModalOpen = false,
   isChaosArenaOpen = false,
   hasUrgentArenaEvent = false,
+  isSurrenderVoteActive = false,
+  surrenderCooldownSeconds = 0,
+  isSurrenderConditionMet = true,
   onCheers,
   onToggleMic,
   onOpenFoodModal,
@@ -52,6 +61,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   onCallWaiter,
   onSelectMinigame,
   onOpenShop,
+  onTriggerSurrenderBillVote,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
@@ -252,9 +262,45 @@ export const BottomDock: React.FC<BottomDockProps> = ({
             <ShoppingBag className="w-4 h-4 text-emerald-400" />
             <span className="hidden sm:inline">Tạp Hóa</span>
           </button>
+
+          {/* [🧾 GỌI TÍNH TIỀN] ("Em Ơi Tính Tiền!" Surrender Vote Trigger) */}
+          <button
+            data-testid="call-bill-surrender-btn"
+            onClick={() => {
+              setShowGameMenu(false);
+              onTriggerSurrenderBillVote();
+            }}
+            className={`py-2 px-3 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 ${
+              surrenderCooldownSeconds > 0
+                ? 'bg-red-950/90 border-red-500/80 text-red-300'
+                : isSurrenderVoteActive
+                ? 'bg-rose-600 text-white border-rose-300 animate-pulse'
+                : isSurrenderConditionMet
+                ? 'bg-rose-500/20 hover:bg-rose-500/35 border-rose-400 text-rose-200'
+                : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-zinc-300'
+            }`}
+            title={
+              surrenderCooldownSeconds > 0
+                ? `Bàn đang sung, cấm bàn lùi! (Khóa ${surrenderCooldownSeconds}s)`
+                : 'Em Ơi Tính Tiền! (Surrender Vote kiểu Bàn Nhậu - Gõ /tinhtien hoặc bấm nút)'
+            }
+          >
+            {surrenderCooldownSeconds > 0 ? (
+              <>
+                <Lock className="w-3.5 h-3.5 text-red-400" />
+                <span>Cấm Bàn Lùi ({surrenderCooldownSeconds}s)</span>
+              </>
+            ) : (
+              <>
+                <Receipt className="w-4 h-4 text-rose-400" />
+                <span>🧾 GỌI TÍNH TIỀN</span>
+              </>
+            )}
+          </button>
         </div>
       )}
     </div>
   );
 };
+
 

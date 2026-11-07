@@ -219,7 +219,7 @@ export const PlayerProfileModel = mongoose.model<IPlayerProfile>('PlayerProfile'
 export const GameHistoryModel = mongoose.model<IGameHistory>('GameHistory', GameHistorySchema);
 
 // ----------------------------------------------------------------------------
-// MONGO DB CONNECTION (required — no in-memory fallback)
+// MONGO DB CONNECTION (required — no fallback)
 // ----------------------------------------------------------------------------
 
 const mongoUri = process.env.MONGODB_URI;
