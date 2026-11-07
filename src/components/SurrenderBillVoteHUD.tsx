@@ -63,6 +63,7 @@ interface SurrenderBillVoteHUDProps {
   onMashEscapeQTE: (action: 'run_wc' | 'tie_shoelace') => void;
   onBoostUserDrunk88ForTest: () => void;
   onCloseOrContinueParty: () => void;
+  onStartReturnCommute?: () => void;
 }
 
 const AVATAR_EMOJI: Record<Player['avatar'], string> = {
@@ -94,6 +95,7 @@ export const SurrenderBillVoteHUD: React.FC<SurrenderBillVoteHUDProps> = ({
   onMashEscapeQTE,
   onBoostUserDrunk88ForTest,
   onCloseOrContinueParty,
+  onStartReturnCommute,
 }) => {
   const [timerVisualMode, setTimerVisualMode] = useState<'cigarette' | 'beer'>(
     'cigarette'
@@ -785,13 +787,25 @@ export const SurrenderBillVoteHUD: React.FC<SurrenderBillVoteHUDProps> = ({
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={onCloseOrContinueParty}
-              className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wider cursor-pointer transition"
-            >
-              🍻 CẢM ƠN NHÀ TÀI TRỢ KIM CƯƠNG & TIẾP TỤC CHƠI!
-            </button>
+            <div className="space-y-2">
+              {onStartReturnCommute && (
+                <button
+                  type="button"
+                  data-testid="surrender-to-return-commute-btn"
+                  onClick={onStartReturnCommute}
+                  className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 border-2 border-amber-300 text-white font-black text-sm uppercase tracking-wider cursor-pointer transition shadow-lg"
+                >
+                  🛵 RA BÃI GIỮ XE VỀ NHÀ — ĐƯỜNG VỀ "THẬP TỬ NHẤT SINH" & CHỐT CSGT 20M!
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onCloseOrContinueParty}
+                className="w-full py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-xs uppercase tracking-wider cursor-pointer transition"
+              >
+                🍻 CẢM ƠN NHÀ TÀI TRỢ KIM CƯƠNG & TIẾP TỤC CHƠI TẠI BÀN!
+              </button>
+            </div>
           </div>
         </div>
       )}

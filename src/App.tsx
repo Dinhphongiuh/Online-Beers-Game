@@ -59,6 +59,12 @@ import {
   SurrenderBillVoteHUD,
   SurrenderPhase,
 } from './components/SurrenderBillVoteHUD';
+import { CommuteLoopModal } from './components/CommuteLoopModal';
+import {
+  BikeSkinId,
+  CommuteTransportMode,
+  ReturnCommuteResolutionResult,
+} from './game/commuteLoopLogic';
 import {
   ANTI_SPAM_LOCK_MESSAGE,
   BILL_ESCAPE_QTE_DURATION_SECONDS,
@@ -308,10 +314,15 @@ export default function App({
     totalBill: 468000,
   });
 
+  const shouldSkipInitialCommute =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('skip_commute') === '1';
+
   // Physics-based IK Hand, Camera & Open-World Sandbox State Machine
+  // Thay vì spawn thẳng vào chiếc ghế nhựa, mỗi người chơi xuất phát từ căn nhà trong hẻm!
   const [ikState, setIkState] = useState<IKHandControlState>({
-    controlMode: 'seated',
-    cameraMode: 'seated_3rd',
+    controlMode: shouldSkipInitialCommute ? 'seated' : 'free_roam',
+    cameraMode: shouldSkipInitialCommute ? 'seated_3rd' : 'free_roam',
     aimX: 0,
     aimY: 0,
     isGrabbing: false,
@@ -320,7 +331,7 @@ export default function App({
     heldItem: 'beer_mug',
     chairBalance: 0,
     isFallenOffChair: false,
-    freeRoamPos: { x: 0, z: 2.35, angle: Math.PI, isMoving: false },
+    freeRoamPos: { x: -4.2, z: 3.4, angle: 0.4, isMoving: false },
     isHeadbutting: false,
     emote: 'none',
     micVolume: 0,
@@ -411,6 +422,17 @@ export default function App({
   const [qteUserAction, setQteUserAction] = useState<BillEscapeAction>('none');
   const [qteResolution, setQteResolution] =
     useState<BillEscapeResolution | null>(null);
+
+  // ============================================================================
+  // STATE CHO HỆ THỐNG "LỘ TRÌNH DI CHUYỂN: ĐI TỈNH VỀ QUẮC" (COMMUTE LOOP)
+  // Ngay sau khi kết thúc màn hình Loading 100%, mở Giai đoạn 1: Xuất Phát Từ Căn Nhà Trong Hẻm!
+  // ============================================================================
+  const [isCommuteModalOpen, setIsCommuteModalOpen] = useState<boolean>(
+    !shouldSkipInitialCommute
+  );
+  const [commuteModalPhase, setCommuteModalPhase] = useState<
+    'outbound' | 'return'
+  >('outbound');
 
   // Living Chaos Arena & 6 Meme Generator Systems State
   const [arenaState, setArenaState] = useState<ChaosArenaState>({
@@ -4115,6 +4137,127 @@ export default function App({
     setQteUserClicks((prev) => prev + 1);
   };
 
+  // ============================================================================
+  // HANDLERS CHO HỆ THỐNG "LỘ TRÌNH DI CHUYỂN: ĐI TỈNH VỀ QUẮC" (COMMUTE LOOP)
+  // ============================================================================
+  const persistCommuteProfileToBackend = (payload: {
+    coins: number;
+    title?: string;
+    bikeImpoundMatchesLeft?: number;
+    selectedBikeSkin?: BikeSkinId;
+  }) => {
+    const token = localStorage.getItem('nhau_auth_token');
+    fetch('/api/commute/record-outcome', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        playerId: userPlayer.id,
+        playerName: userPlayer.name,
+        ...payload,
+      }),
+    }).catch(() => null);
+  };
+
+  const handleOpenCommuteModal = (phase: 'outbound' | 'return' = 'outbound') => {
+    sceneRef.current?.releasePointerLock();
+    setCommuteModalPhase(phase);
+    setIsCommuteModalOpen(true);
+  };
+
+  const handleApplyOutboundCommuteResult = (payload: {
+    mode: CommuteTransportMode;
+    bikeSkin: BikeSkinId;
+    coinsDelta: number;
+    danToBonusPoints: number;
+    pubSignCrashPenaltyVnd: number;
+    headline: string;
+  }) => {
+    const nextCoins = Math.max(
+      0,
+      userPlayer.coins + payload.coinsDelta + payload.danToBonusPoints
+    );
+    const nextTitle =
+      payload.mode === 'self_bike' ? 'Dân Tổ Vỉa Hè 🛵' : userPlayer.title;
+
+    setTableState((prev) => ({
+      ...prev,
+      totalBill: prev.totalBill + payload.pubSignCrashPenaltyVnd,
+      players: prev.players.map((p) =>
+        p.isUser
+          ? {
+              ...p,
+              coins: nextCoins,
+              title: nextTitle,
+              selectedBikeSkin: payload.bikeSkin,
+              commuteModeUsed: payload.mode,
+            }
+          : p
+      ),
+    }));
+
+    persistCommuteProfileToBackend({
+      coins: nextCoins,
+      title: nextTitle,
+      selectedBikeSkin: payload.bikeSkin,
+    });
+
+    setIsCommuteModalOpen(false);
+    showToast(payload.headline);
+  };
+
+  const handleApplyReturnCommuteResult = (
+    result: ReturnCommuteResolutionResult
+  ) => {
+    const nextTitle = result.awardedTitle || userPlayer.title;
+    setTableState((prev) => ({
+      ...prev,
+      players: prev.players.map((p) =>
+        p.isUser
+          ? {
+              ...p,
+              coins: result.newCoins,
+              title: nextTitle,
+              bikeImpoundMatchesLeft: result.newImpoundMatchesLeft,
+            }
+          : p
+      ),
+    }));
+
+    persistCommuteProfileToBackend({
+      coins: result.newCoins,
+      title: nextTitle,
+      bikeImpoundMatchesLeft: result.newImpoundMatchesLeft,
+      selectedBikeSkin: userPlayer.selectedBikeSkin || 'dream_chien',
+    });
+
+    if (result.caughtByPoliceCheckpoint) {
+      sound.playStampSlam();
+    } else {
+      confetti({ particleCount: 55, spread: 70, origin: { y: 0.6 } });
+    }
+
+    setIsCommuteModalOpen(false);
+    showToast(result.summaryHeadline);
+  };
+
+  const handleRedeemImpoundedBikeForTest = () => {
+    sound.playBell();
+    setTableState((prev) => ({
+      ...prev,
+      players: prev.players.map((p) =>
+        p.isUser ? { ...p, bikeImpoundMatchesLeft: 0 } : p
+      ),
+    }));
+    persistCommuteProfileToBackend({
+      coins: userPlayer.coins,
+      bikeImpoundMatchesLeft: 0,
+    });
+    showToast('🔓 Đã hoàn tất thủ tục chuộc chiến cơ từ đồn CSGT về sân nhà!');
+  };
+
   const handleTriggerDrunkSubtitle = (original: string, translated: string) => {
     const forceDrunkAlc = Math.max(76, userPlayer.alcoholLevel);
     const processed = processDrunkChat(original, forceDrunkAlc);
@@ -4458,128 +4601,228 @@ export default function App({
         )
       )}
 
-      {/* Top HUD */}
-      <TopBar
-        userPlayer={userPlayer}
-        tableState={tableState}
-        isBgmActive={isBgmActive}
-        onToggleBgm={() => {
-          const next = !isBgmActive;
-          setIsBgmActive(next);
-          sound.toggleBGM(next);
-        }}
-        onOpenLobby={() => setActiveModal('lobby')}
-        onOpenShop={() => setActiveModal('shop')}
-        onOpenDrinkModal={() => {
-          setDrinkModalTab('wc');
-          setActiveModal('drink_bladder');
-        }}
-        onOpenAuth={isLoggedIn ? undefined : () => setActiveModal('auth')}
-        onLogout={isLoggedIn ? onLogout : undefined}
-      />
+      {/* Table-Phase HUD Overlays (Hidden during 3D Commute Loop so the 3D Alley & Cockpit have zero HUD overlap) */}
+      {!isCommuteModalOpen && (
+        <>
+          {/* Top HUD */}
+          <TopBar
+            userPlayer={userPlayer}
+            tableState={tableState}
+            isBgmActive={isBgmActive}
+            onToggleBgm={() => {
+              const next = !isBgmActive;
+              setIsBgmActive(next);
+              sound.toggleBGM(next);
+            }}
+            onOpenLobby={() => setActiveModal('lobby')}
+            onOpenShop={() => setActiveModal('shop')}
+            onOpenDrinkModal={() => {
+              setDrinkModalTab('wc');
+              setActiveModal('drink_bladder');
+            }}
+            onOpenAuth={isLoggedIn ? undefined : () => setActiveModal('auth')}
+            onLogout={isLoggedIn ? onLogout : undefined}
+          />
 
-      {/* Urgent Living Chaos Event Banner (Rain Tarp QTE, Urban Patrol, or Wife Call Stealth) */}
-      {(arenaState.isRaining && !arenaState.isTarpPulled) ||
-      arenaState.urbanPatrolActive ||
-      arenaState.wifeCallActive ? (
-        <div className="fixed top-28 left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 pointer-events-auto px-3">
-          {arenaState.isRaining && !arenaState.isTarpPulled && (
-            <button
-              onClick={handlePullRainTarp}
-              className="bg-sky-600 hover:bg-sky-500 text-white border-2 border-sky-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
-            >
-              <CloudRain className="w-4 h-4" />
-              <span>
-                🌧️ MƯA RÀO BẤT CHỢT ({arenaState.rainCountdown}s) — BẤM KÉO BẠT CHE MƯA NGAY!
-              </span>
-              <Umbrella className="w-4 h-4" />
-            </button>
-          )}
-          {arenaState.urbanPatrolActive && (
-            <button
-              onClick={handleRetreatTableBehindWhiteLine}
-              className="bg-rose-600 hover:bg-rose-500 text-white border-2 border-rose-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
-            >
-              <ShieldAlert className="w-4 h-4" />
-              <span>
-                🚨 ĐÔ THỊ DẸP VỈA HÈ ({arenaState.urbanPatrolCountdown}s) — BẤM BÊ BÀN LÙI VÀO VẠCH TRẮNG!
-              </span>
-            </button>
-          )}
-          {arenaState.wifeCallActive && (
-            <button
-              onClick={handleShushFriendsDuringWifeCall}
-              className="bg-amber-600 hover:bg-amber-500 text-zinc-950 border-2 border-amber-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
-            >
-              <span>
-                🤫🐅 NÓC NHÀ ĐANG GỌI ({arenaState.wifeCallCountdown}s | Ồn: {arenaState.wifeCallNoiseLevel}%) — BẤM "SUỴT!" BỊT MIỆNG BẠN NHẬU!
-              </span>
-            </button>
-          )}
-        </div>
-      ) : null}
+          {/* Urgent Living Chaos Event Banner (Rain Tarp QTE, Urban Patrol, or Wife Call Stealth) */}
+          {(arenaState.isRaining && !arenaState.isTarpPulled) ||
+          arenaState.urbanPatrolActive ||
+          arenaState.wifeCallActive ? (
+            <div className="fixed top-28 left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 pointer-events-auto px-3">
+              {arenaState.isRaining && !arenaState.isTarpPulled && (
+                <button
+                  onClick={handlePullRainTarp}
+                  className="bg-sky-600 hover:bg-sky-500 text-white border-2 border-sky-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
+                >
+                  <CloudRain className="w-4 h-4" />
+                  <span>
+                    🌧️ MƯA RÀO BẤT CHỢT ({arenaState.rainCountdown}s) — BẤM KÉO BẠT CHE MƯA NGAY!
+                  </span>
+                  <Umbrella className="w-4 h-4" />
+                </button>
+              )}
+              {arenaState.urbanPatrolActive && (
+                <button
+                  onClick={handleRetreatTableBehindWhiteLine}
+                  className="bg-rose-600 hover:bg-rose-500 text-white border-2 border-rose-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>
+                    🚨 ĐÔ THỊ DẸP VỈA HÈ ({arenaState.urbanPatrolCountdown}s) — BẤM BÊ BÀN LÙI VÀO VẠCH TRẮNG!
+                  </span>
+                </button>
+              )}
+              {arenaState.wifeCallActive && (
+                <button
+                  onClick={handleShushFriendsDuringWifeCall}
+                  className="bg-amber-600 hover:bg-amber-500 text-zinc-950 border-2 border-amber-200 rounded-2xl px-4 py-2 text-xs font-black shadow-2xl flex items-center gap-2 animate-bounce cursor-pointer"
+                >
+                  <span>
+                    🤫🐅 NÓC NHÀ ĐANG GỌI ({arenaState.wifeCallCountdown}s | Ồn: {arenaState.wifeCallNoiseLevel}%) — BẤM "SUỴT!" BỊT MIỆNG BẠN NHẬU!
+                  </span>
+                </button>
+              )}
+            </div>
+          ) : null}
 
-      {/* 3D Overhead Drunk Chat Bubble, Quick-Chat Wheel [Q], Animalese TTS & Ex/Boss QTE Bubble */}
-      <OverheadDrunkChatHUD
-        userPlayer={userPlayer}
-        activeChatBubble={activeChatBubble}
-        exCallQTEActive={arenaState.exCallQTEActive}
-        exCallCountdown={arenaState.exCallCountdown}
-        exCallSnatchClicks={arenaState.exCallSnatchClicks}
-        exCallTargetName={exCallTargetName}
-        exCallResultReply={exCallResultReply}
-        isLovesickUnderTable={arenaState.isLovesickUnderTable}
-        lovesickTimer={arenaState.lovesickTimer}
-        onSendChat={handleSendDrunkChat}
-        onSnatchExPhonePhysical={() => handleSnatchExPhone('snatch_hotpot')}
-        onInterruptExPhoneWithPeanutOrIce={() => handleSnatchExPhone('throw_ice')}
-      />
+          {/* 3D Overhead Drunk Chat Bubble, Quick-Chat Wheel [Q], Animalese TTS & Ex/Boss QTE Bubble */}
+          <OverheadDrunkChatHUD
+            userPlayer={userPlayer}
+            activeChatBubble={activeChatBubble}
+            exCallQTEActive={arenaState.exCallQTEActive}
+            exCallCountdown={arenaState.exCallCountdown}
+            exCallSnatchClicks={arenaState.exCallSnatchClicks}
+            exCallTargetName={exCallTargetName}
+            exCallResultReply={exCallResultReply}
+            isLovesickUnderTable={arenaState.isLovesickUnderTable}
+            lovesickTimer={arenaState.lovesickTimer}
+            onSendChat={handleSendDrunkChat}
+            onSnatchExPhonePhysical={() => handleSnatchExPhone('snatch_hotpot')}
+            onInterruptExPhoneWithPeanutOrIce={() => handleSnatchExPhone('throw_ice')}
+          />
 
-      {/* NPC Phi Quân (Gấu Trúc >= 80% Alcohol) Auto-Call to NYC Mai Anh, NPC Khoa Nguyễn (Gấu Nâu >= 80% Alcohol) Tree Climbing & NPC Nga Phan (Chuột Hamster 0% Cồn) */}
-      <PhiQuanMaiAnhCallHUD
-        phiQuanPlayer={phiQuanPlayer}
-        countdown={phiQuanCallCountdown}
-        stopProgress={phiQuanStopProgress}
-        lastStopLog={phiQuanLastStopLog}
-        onForcePhiQuan80Percent={handleForcePhiQuan80Percent}
-        onStopPhiQuanAction={handleStopPhiQuanAction}
-        onComfortHeartbrokenPhiQuan={handleComfortHeartbrokenPhiQuan}
-        khoaNguyenPlayer={khoaNguyenPlayer}
-        onForceKhoaNguyen80Percent={handleForceKhoaNguyen80Percent}
-        onGetKhoaDownFromTree={handleGetKhoaDownFromTree}
-        ngaPhanPlayer={ngaPhanPlayer}
-        onTriggerNgaPhanDestroyFood={handleTriggerNgaPhanDestroyFood}
-      />
+          {/* NPC Phi Quân (Gấu Trúc >= 80% Alcohol) Auto-Call to NYC Mai Anh, NPC Khoa Nguyễn (Gấu Nâu >= 80% Alcohol) Tree Climbing & NPC Nga Phan (Chuột Hamster 0% Cồn) */}
+          <PhiQuanMaiAnhCallHUD
+            phiQuanPlayer={phiQuanPlayer}
+            countdown={phiQuanCallCountdown}
+            stopProgress={phiQuanStopProgress}
+            lastStopLog={phiQuanLastStopLog}
+            onForcePhiQuan80Percent={handleForcePhiQuan80Percent}
+            onStopPhiQuanAction={handleStopPhiQuanAction}
+            onComfortHeartbrokenPhiQuan={handleComfortHeartbrokenPhiQuan}
+            khoaNguyenPlayer={khoaNguyenPlayer}
+            onForceKhoaNguyen80Percent={handleForceKhoaNguyen80Percent}
+            onGetKhoaDownFromTree={handleGetKhoaDownFromTree}
+            ngaPhanPlayer={ngaPhanPlayer}
+            onTriggerNgaPhanDestroyFood={handleTriggerNgaPhanDestroyFood}
+          />
 
-      {/* Quán Nhậu Open-World Sandbox HUD ("Tổ Hợp Ăn Chơi Xuyên Đêm" - 4 Zones, Ragdoll, Heavy Props & Events) */}
-      <OpenWorldSandboxHUD
-        userPlayer={userPlayer}
-        players={tableState.players}
-        ikState={ikState}
-        yellowPuddleActive={yellowPeePuddleActive}
-        onToggleFreeRoam={handleToggleControlMode}
-        onNavigateZone={handleNavigateZone}
-        onToggleCrawlingMode={handleToggleCrawlingMode}
-        onToggleGrabSupport={handleToggleGrabSupport}
-        onRecoverFaceplant={handleRecoverFaceplant}
-        onTriggerDrunkInputDriftStep={handleTriggerDrunkInputDriftStep}
-        onKitchenFlipGrill={handleKitchenFlipGrill}
-        onAlleySneakAction={handleAlleySneakAction}
-        onAtmStoreAction={handleAtmStoreAction}
-        onCarryOrThrowHeavyProp={handleCarryOrThrowHeavyProp}
-        onPushFoodCartCrash={handlePushFoodCartCrash}
-        onToggleWingmanCarry={handleToggleWingmanCarry}
-        onTackleBeerTrayFriend={handleTackleBeerTrayFriend}
-        onTriggerPatrolRetreatTable={() => {
-          if (arenaState.urbanPatrolActive) {
-            handleRetreatTableBehindWhiteLine();
-          } else {
-            handleTriggerUrbanPatrol();
-          }
-        }}
-        onStartUrgentPeeRush={handleStartUrgentPeeRush}
-        onRivalTableAction={handleRivalTableAction}
-      />
+          {/* Quán Nhậu Open-World Sandbox HUD ("Tổ Hợp Ăn Chơi Xuyên Đêm" - 4 Zones, Ragdoll, Heavy Props & Events) */}
+          <OpenWorldSandboxHUD
+            userPlayer={userPlayer}
+            players={tableState.players}
+            ikState={ikState}
+            yellowPuddleActive={yellowPeePuddleActive}
+            onToggleFreeRoam={handleToggleControlMode}
+            onNavigateZone={handleNavigateZone}
+            onToggleCrawlingMode={handleToggleCrawlingMode}
+            onToggleGrabSupport={handleToggleGrabSupport}
+            onRecoverFaceplant={handleRecoverFaceplant}
+            onTriggerDrunkInputDriftStep={handleTriggerDrunkInputDriftStep}
+            onKitchenFlipGrill={handleKitchenFlipGrill}
+            onAlleySneakAction={handleAlleySneakAction}
+            onAtmStoreAction={handleAtmStoreAction}
+            onCarryOrThrowHeavyProp={handleCarryOrThrowHeavyProp}
+            onPushFoodCartCrash={handlePushFoodCartCrash}
+            onToggleWingmanCarry={handleToggleWingmanCarry}
+            onTackleBeerTrayFriend={handleTackleBeerTrayFriend}
+            onTriggerPatrolRetreatTable={() => {
+              if (arenaState.urbanPatrolActive) {
+                handleRetreatTableBehindWhiteLine();
+              } else {
+                handleTriggerUrbanPatrol();
+              }
+            }}
+            onStartUrgentPeeRush={handleStartUrgentPeeRush}
+            onRivalTableAction={handleRivalTableAction}
+          />
+
+          {/* Drunken Screen Post-FX (Chromatic Aberration, Dozing Blink, Cold Towel Splash, Craft Beer, Stun, Spotlight) */}
+          <DrunkEffectOverlay
+            alcoholLevel={userPlayer.alcoholLevel}
+            coldTowelBuffTimer={ikState.coldTowelBuffTimer}
+            waterSplashActive={waterSplashActive}
+            craftBeerHallucination={craftBeerHallucination}
+            isStunned={userPlayer.isStunned}
+            isSpicedMouth={userPlayer.isSpicedMouth}
+            spotlightVictimName={spotlightVictimName}
+            cheatingAlertText={cheatingAlertText}
+            onWakeUp={handleWakeUp}
+          />
+
+          {/* Contextual Camera System & Physics IK Hand Controls HUD */}
+          <CameraAndControlsHUD
+            alcoholLevel={userPlayer.alcoholLevel}
+            ikState={ikState}
+            isMicActive={tableState.isMicCheersActive}
+            crowdDecibel={crowdDecibel}
+            onToggleCameraPOV={handleToggleCameraPOV}
+            onToggleControlMode={handleToggleControlMode}
+            onTriggerColdTowel={handleTriggerColdTowel}
+            onTriggerEmote={handleTriggerEmote}
+            onNudgeChairBalance={(delta) =>
+              setIkState((prev) => ({
+                ...prev,
+                chairBalance: Math.max(-95, Math.min(95, prev.chairBalance + delta)),
+              }))
+            }
+            onRecoverFromChairFall={() => {
+              sound.playSlap();
+              setIkState((prev) => ({
+                ...prev,
+                isFallenOffChair: false,
+                chairBalance: 0,
+              }));
+              showToast('🪑 Đã lồm cồm bò dậy ngồi lại ngay ngắn trên ghế nhựa!');
+            }}
+            onUpdateAim={(aimX, aimY) =>
+              setIkState((prev) => ({ ...prev, aimX, aimY }))
+            }
+            onMoveFreeRoam={(dx, dz) => {
+              walkStepCountRef.current += 1;
+              if (walkStepCountRef.current % 12 === 0) {
+                setTableState((ts) => ({
+                  ...ts,
+                  players: ts.players.map((p) =>
+                    p.isUser && p.alcoholLevel > 0
+                      ? {
+                          ...p,
+                          alcoholLevel: Math.max(0, p.alcoholLevel - 1),
+                          stamina: Math.min(100, p.stamina + 2),
+                        }
+                      : p
+                  ),
+                }));
+              }
+              setIkState((prev) => {
+                const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
+                const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
+                const angle = Math.atan2(dx, dz);
+                return {
+                  ...prev,
+                  freeRoamPos: { x: nx, z: nz, angle, isMoving: true },
+                };
+              });
+            }}
+            onHoldGrab={(holding) =>
+              setIkState((prev) => {
+                if (!holding && prev.isGrabbing) {
+                  const victim = sceneRef.current?.triggerThrowAtFriend();
+                  if (victim) {
+                    sound.playHeadbutt();
+                    showToast(
+                      `🧊 BỐP! Bạn vung tay ném thẳng viên đá lạnh vào mặt ${victim}!`
+                    );
+                  }
+                }
+                return { ...prev, isGrabbing: holding };
+              })
+            }
+            onHoldCheersCenter={(holding) => {
+              setIkState((prev) => ({ ...prev, isCheersHolding: holding }));
+              if (holding) setCrowdDecibel(62);
+            }}
+            onDrinkOrEat={handleDrinkOrEatWithHand}
+            onHeadbutt={handleHeadbutt}
+            onShoutCrowdDecibel={() => {
+              setCrowdDecibel(98);
+              showToast('🗣️ "1, 2, 3 DZÔÔÔ!" — Cột âm lượng vọt qua vạch đỏ! Cụng ly Slow-Mo!');
+              handleExecuteCheersToast('full_100', 'perfect', 72);
+              setTimeout(() => setCrowdDecibel(32), 1800);
+            }}
+          />
+        </>
+      )}
 
       {/* Live Toast Notification Banner */}
       {toastNotification && (
@@ -4590,101 +4833,6 @@ export default function App({
           </div>
         </div>
       )}
-
-      {/* Drunken Screen Post-FX (Chromatic Aberration, Dozing Blink, Cold Towel Splash, Craft Beer, Stun, Spotlight) */}
-      <DrunkEffectOverlay
-        alcoholLevel={userPlayer.alcoholLevel}
-        coldTowelBuffTimer={ikState.coldTowelBuffTimer}
-        waterSplashActive={waterSplashActive}
-        craftBeerHallucination={craftBeerHallucination}
-        isStunned={userPlayer.isStunned}
-        isSpicedMouth={userPlayer.isSpicedMouth}
-        spotlightVictimName={spotlightVictimName}
-        cheatingAlertText={cheatingAlertText}
-        onWakeUp={handleWakeUp}
-      />
-
-      {/* Contextual Camera System & Physics IK Hand Controls HUD */}
-      <CameraAndControlsHUD
-        alcoholLevel={userPlayer.alcoholLevel}
-        ikState={ikState}
-        isMicActive={tableState.isMicCheersActive}
-        crowdDecibel={crowdDecibel}
-        onToggleCameraPOV={handleToggleCameraPOV}
-        onToggleControlMode={handleToggleControlMode}
-        onTriggerColdTowel={handleTriggerColdTowel}
-        onTriggerEmote={handleTriggerEmote}
-        onNudgeChairBalance={(delta) =>
-          setIkState((prev) => ({
-            ...prev,
-            chairBalance: Math.max(-95, Math.min(95, prev.chairBalance + delta)),
-          }))
-        }
-        onRecoverFromChairFall={() => {
-          sound.playSlap();
-          setIkState((prev) => ({
-            ...prev,
-            isFallenOffChair: false,
-            chairBalance: 0,
-          }));
-          showToast('🪑 Đã lồm cồm bò dậy ngồi lại ngay ngắn trên ghế nhựa!');
-        }}
-        onUpdateAim={(aimX, aimY) =>
-          setIkState((prev) => ({ ...prev, aimX, aimY }))
-        }
-        onMoveFreeRoam={(dx, dz) => {
-          walkStepCountRef.current += 1;
-          if (walkStepCountRef.current % 12 === 0) {
-            setTableState((ts) => ({
-              ...ts,
-              players: ts.players.map((p) =>
-                p.isUser && p.alcoholLevel > 0
-                  ? {
-                      ...p,
-                      alcoholLevel: Math.max(0, p.alcoholLevel - 1),
-                      stamina: Math.min(100, p.stamina + 2),
-                    }
-                  : p
-              ),
-            }));
-          }
-          setIkState((prev) => {
-            const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
-            const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
-            const angle = Math.atan2(dx, dz);
-            return {
-              ...prev,
-              freeRoamPos: { x: nx, z: nz, angle, isMoving: true },
-            };
-          });
-        }}
-        onHoldGrab={(holding) =>
-          setIkState((prev) => {
-            if (!holding && prev.isGrabbing) {
-              const victim = sceneRef.current?.triggerThrowAtFriend();
-              if (victim) {
-                sound.playHeadbutt();
-                showToast(
-                  `🧊 BỐP! Bạn vung tay ném thẳng viên đá lạnh vào mặt ${victim}!`
-                );
-              }
-            }
-            return { ...prev, isGrabbing: holding };
-          })
-        }
-        onHoldCheersCenter={(holding) => {
-          setIkState((prev) => ({ ...prev, isCheersHolding: holding }));
-          if (holding) setCrowdDecibel(62);
-        }}
-        onDrinkOrEat={handleDrinkOrEatWithHand}
-        onHeadbutt={handleHeadbutt}
-        onShoutCrowdDecibel={() => {
-          setCrowdDecibel(98);
-          showToast('🗣️ "1, 2, 3 DZÔÔÔ!" — Cột âm lượng vọt qua vạch đỏ! Cụng ly Slow-Mo!');
-          handleExecuteCheersToast('full_100', 'perfect', 72);
-          setTimeout(() => setCrowdDecibel(32), 1800);
-        }}
-      />
 
       {/* Interactive 3-Phase "1, 2, 3 DZÔ!" HUD Overlay (Clink Force Timing + Cup Level + 100%/50%/10% Lip-Sip) */}
       {activeModal === 'cheers_toast' && (
@@ -4942,52 +5090,82 @@ export default function App({
           );
         }}
         onCloseOrContinueParty={() => setSurrenderPhase('idle')}
+        onStartReturnCommute={() => {
+          setSurrenderPhase('idle');
+          handleOpenCommuteModal('return');
+        }}
       />
 
-      {/* Unified Collapsible Bottom Dock (Zero Viewport Occlusion) */}
-      <BottomDock
+      {/* "Lộ Trình Di Chuyển: Đi Tỉnh Về Quắc" (3D Immersive Commute & FPP/TPP Driving HUD) */}
+      <CommuteLoopModal
+        isOpen={isCommuteModalOpen}
+        initialPhase={commuteModalPhase}
         userPlayer={userPlayer}
-        dishes={tableState.foodDishes}
-        cupLiquidLevel={cupState.liquidLevel}
-        isMicActive={tableState.isMicCheersActive}
-        isFoodModalOpen={activeModal === 'food_grab'}
-        isDrinkModalOpen={activeModal === 'drink_bladder'}
-        isChaosArenaOpen={activeModal === 'chaos_arena'}
-        hasUrgentArenaEvent={
-          (arenaState.isRaining && !arenaState.isTarpPulled) ||
-          arenaState.urbanPatrolActive ||
-          arenaState.exCallQTEActive ||
-          arenaState.wifeCallActive
+        totalBill={tableState.totalBill}
+        onUpdateCommute3DState={(partial) =>
+          sceneRef.current?.updateCommute3DState(partial)
         }
-        isSurrenderVoteActive={surrenderPhase !== 'idle'}
-        surrenderCooldownSeconds={surrenderTriggerCheck.cooldownRemainingSeconds}
-        isSurrenderConditionMet={
-          surrenderTriggerCheck.conditionSummary.isTimeMet ||
-          surrenderTriggerCheck.conditionSummary.isAlcoholMet
-        }
-        onCheers={handleCheersWithTableRules}
-        onToggleMic={handleToggleMic}
-        onOpenFoodModal={() =>
-          setActiveModal((prev) => (prev === 'food_grab' ? 'none' : 'food_grab'))
-        }
-        onOpenDrinkModal={(tab = 'drinks') => {
-          setDrinkModalTab(tab);
-          setActiveModal((prev) =>
-            prev === 'drink_bladder' && drinkModalTab === tab ? 'none' : 'drink_bladder'
-          );
+        onApplyOutboundResult={handleApplyOutboundCommuteResult}
+        onApplyReturnResult={handleApplyReturnCommuteResult}
+        onRedeemImpoundedBikeForTest={handleRedeemImpoundedBikeForTest}
+        onClose={() => {
+          sceneRef.current?.updateCommute3DState({ active: false });
+          setIkState((prev) => ({
+            ...prev,
+            controlMode: 'seated',
+            cameraMode: 'seated_3rd',
+          }));
+          setIsCommuteModalOpen(false);
         }}
-        onOpenChaosArena={(tab = 'meme_systems') => {
-          setChaosArenaTab(tab);
-          setActiveModal((prev) =>
-            prev === 'chaos_arena' && chaosArenaTab === tab ? 'none' : 'chaos_arena'
-          );
-        }}
-        onCallWaiter={handleCallWaiter}
-        onGoToToilet={handleEnterToilet}
-        onSelectMinigame={handleSelectMinigame}
-        onOpenShop={() => setActiveModal('shop')}
-        onTriggerSurrenderBillVote={() => handleTriggerSurrenderBillVote(false)}
       />
+
+      {/* Unified Collapsible Bottom Dock (Hidden during 3D Commute / Driving so 3D Cockpit is 100% unobstructed) */}
+      {!isCommuteModalOpen && (
+        <BottomDock
+          userPlayer={userPlayer}
+          dishes={tableState.foodDishes}
+          cupLiquidLevel={cupState.liquidLevel}
+          isMicActive={tableState.isMicCheersActive}
+          isFoodModalOpen={activeModal === 'food_grab'}
+          isDrinkModalOpen={activeModal === 'drink_bladder'}
+          isChaosArenaOpen={activeModal === 'chaos_arena'}
+          hasUrgentArenaEvent={
+            (arenaState.isRaining && !arenaState.isTarpPulled) ||
+            arenaState.urbanPatrolActive ||
+            arenaState.exCallQTEActive ||
+            arenaState.wifeCallActive
+          }
+          isSurrenderVoteActive={surrenderPhase !== 'idle'}
+          surrenderCooldownSeconds={surrenderTriggerCheck.cooldownRemainingSeconds}
+          isSurrenderConditionMet={
+            surrenderTriggerCheck.conditionSummary.isTimeMet ||
+            surrenderTriggerCheck.conditionSummary.isAlcoholMet
+          }
+          onCheers={handleCheersWithTableRules}
+          onToggleMic={handleToggleMic}
+          onOpenFoodModal={() =>
+            setActiveModal((prev) => (prev === 'food_grab' ? 'none' : 'food_grab'))
+          }
+          onOpenDrinkModal={(tab = 'drinks') => {
+            setDrinkModalTab(tab);
+            setActiveModal((prev) =>
+              prev === 'drink_bladder' && drinkModalTab === tab ? 'none' : 'drink_bladder'
+            );
+          }}
+          onOpenChaosArena={(tab = 'meme_systems') => {
+            setChaosArenaTab(tab);
+            setActiveModal((prev) =>
+              prev === 'chaos_arena' && chaosArenaTab === tab ? 'none' : 'chaos_arena'
+            );
+          }}
+          onCallWaiter={handleCallWaiter}
+          onGoToToilet={handleEnterToilet}
+          onSelectMinigame={handleSelectMinigame}
+          onOpenShop={() => setActiveModal('shop')}
+          onTriggerSurrenderBillVote={() => handleTriggerSurrenderBillVote(false)}
+          onOpenCommuteModal={(phase = 'outbound') => handleOpenCommuteModal(phase)}
+        />
+      )}
     </div>
   );
 }

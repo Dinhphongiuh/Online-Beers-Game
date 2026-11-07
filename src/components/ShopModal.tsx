@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Player, CharacterAvatar, ClothingType, HatType, GlassType } from '../game/types';
+import { BIKE_SKINS, BikeSkinId, IMPOUNDED_BIKE_TAG_TEMPLATE } from '../game/commuteLoopLogic';
 import { sound } from '../game/audio';
-import { ShoppingBag, Check, Coins, Sparkles } from 'lucide-react';
+import { ShoppingBag, Check, Coins, Lock } from 'lucide-react';
 
 interface ShopModalProps {
   userPlayer: Player;
@@ -10,6 +11,7 @@ interface ShopModalProps {
     clothing?: ClothingType;
     hat?: HatType;
     glassType?: GlassType;
+    selectedBikeSkin?: BikeSkinId;
   }) => void;
   onClose: () => void;
 }
@@ -19,7 +21,12 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   onUpdateCosmetics,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'avatar' | 'clothing' | 'hat' | 'glass'>('avatar');
+  const [activeTab, setActiveTab] = useState<
+    'avatar' | 'clothing' | 'hat' | 'glass' | 'bike'
+  >('avatar');
+
+  const impoundLeft = userPlayer.bikeImpoundMatchesLeft || 0;
+  const currentBikeSkin: BikeSkinId = userPlayer.selectedBikeSkin || 'dream_chien';
 
   const avatars: { id: CharacterAvatar; name: string; icon: string; desc: string }[] = [
     { id: 'dog', name: 'Chó Cỏ Vàng', icon: '🐕', desc: 'Trung thành, chuyên húp trọn đáy ly' },
@@ -51,21 +58,32 @@ export const ShopModal: React.FC<ShopModalProps> = ({
     { id: 'jade_cup', name: 'Chén Ngọc Hoàng Gia', icon: '🏺', desc: 'Nhậu quý tộc sang chảnh' },
   ];
 
-  const handleSelect = (category: 'avatar' | 'clothing' | 'hat' | 'glass', value: string) => {
+  const handleSelect = (
+    category: 'avatar' | 'clothing' | 'hat' | 'glass' | 'bike',
+    value: string
+  ) => {
+    if (category === 'bike' && impoundLeft > 0) {
+      sound.playPoliceWhistleAndBreathalyzer(true);
+      return;
+    }
     sound.playClink();
-    onUpdateCosmetics({ [category === 'glass' ? 'glassType' : category]: value });
+    if (category === 'bike') {
+      onUpdateCosmetics({ selectedBikeSkin: value as BikeSkinId });
+    } else {
+      onUpdateCosmetics({ [category === 'glass' ? 'glassType' : category]: value });
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
       <div className="bg-zinc-900 border border-amber-500/50 rounded-2xl p-5 shadow-2xl w-full max-w-lg text-white max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-3">
           <div className="flex items-center gap-2">
             <ShoppingBag className="w-6 h-6 text-amber-400" />
             <div>
-              <h3 className="font-extrabold text-amber-400 text-sm">TIỆM TẠP HÓA CÔ BA</h3>
-              <p className="text-xs text-zinc-400">Trang phục, phụ kiện & ly chiến chuẩn dân nhậu</p>
+              <h3 className="font-extrabold text-amber-400 text-sm">TIỆM TẠP HÓA CÔ BA & TỦ ĐỒ</h3>
+              <p className="text-xs text-zinc-400">Trang phục, phụ kiện, ly chiến & chiến cơ đi nhậu</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -74,7 +92,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
             </div>
             <button
               onClick={onClose}
-              className="px-2 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400"
+              className="px-2 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 cursor-pointer"
             >
               Đóng
             </button>
@@ -82,12 +100,13 @@ export const ShopModal: React.FC<ShopModalProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-zinc-800 pb-2 mb-3">
+        <div className="flex gap-1 border-b border-zinc-800 pb-2 mb-3 overflow-x-auto">
           {[
             { id: 'avatar', label: '🐾 Thú Chibi' },
             { id: 'clothing', label: '🎽 Quần Áo' },
             { id: 'hat', label: '🕶️ Phụ Kiện' },
             { id: 'glass', label: '🍺 Ly Cụng' },
+            { id: 'bike', label: '🛵 Chiến Cơ' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -95,7 +114,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
                 setActiveTab(tab.id as typeof activeTab);
                 sound.playDiceShake();
               }}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
                 activeTab === tab.id
                   ? 'bg-amber-600 text-white shadow'
                   : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700'
@@ -259,14 +278,75 @@ export const ShopModal: React.FC<ShopModalProps> = ({
                 </div>
               );
             })}
+
+          {activeTab === 'bike' && (
+            <>
+              {impoundLeft > 0 && (
+                <div className="p-3 rounded-xl bg-red-950/90 border-2 border-red-500 text-red-200 text-xs font-black flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{IMPOUNDED_BIKE_TAG_TEMPLATE(impoundLeft)}</span>
+                </div>
+              )}
+              {(Object.keys(BIKE_SKINS) as BikeSkinId[]).map((skinId) => {
+                const spec = BIKE_SKINS[skinId];
+                const isEquipped = currentBikeSkin === skinId;
+                return (
+                  <div
+                    key={skinId}
+                    onClick={() => handleSelect('bike', skinId)}
+                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      impoundLeft > 0
+                        ? 'bg-red-950/30 border-red-800/70 opacity-80'
+                        : isEquipped
+                        ? 'bg-amber-950/60 border-amber-500'
+                        : 'bg-zinc-800/60 border-zinc-700 hover:bg-zinc-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-3xl">🛵</span>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
+                          <span>{spec.name}</span>
+                          {impoundLeft > 0 ? (
+                            <span className="text-[10px] bg-red-700 px-1.5 py-0.5 rounded text-white font-black">
+                              {IMPOUNDED_BIKE_TAG_TEMPLATE(impoundLeft)}
+                            </span>
+                          ) : (
+                            isEquipped && (
+                              <span className="text-[10px] bg-emerald-600 px-1.5 py-0.5 rounded text-white">
+                                Đang dựng ở sân nhà
+                              </span>
+                            )
+                          )}
+                        </div>
+                        <div className="text-[11px] text-zinc-400">{spec.subtitle}</div>
+                        <div className="text-[10px] text-amber-300 font-semibold mt-0.5">
+                          Tốc độ tối đa: {spec.maxSpeedKmh} km/h • Đề máy: {spec.kickstartPressesRequired} phát [E]
+                        </div>
+                      </div>
+                    </div>
+                    {impoundLeft > 0 ? (
+                      <Lock className="w-5 h-5 text-red-400 shrink-0" />
+                    ) : isEquipped ? (
+                      <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <button className="px-3 py-1 bg-zinc-700 hover:bg-amber-600 rounded-lg text-xs font-semibold text-white">
+                        Trang bị
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
 
         {/* Footer info */}
         <div className="pt-3 border-t border-zinc-800 text-[11px] text-zinc-400 flex items-center justify-between">
-          <span>✨ Thắng minigame & cụng ly để nhận thêm Nắp Bia!</span>
+          <span>✨ Đã uống rượu bia thì đi Xe Ôm Công Nghệ (50 Nắp) kẻo mất 500 Nắp ở chốt!</span>
           <button
             onClick={onClose}
-            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs"
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs cursor-pointer"
           >
             Xong
           </button>

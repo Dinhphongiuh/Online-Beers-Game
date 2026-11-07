@@ -1038,6 +1038,150 @@ class SoundEngine {
     // Ceramic bowl clink
     this.playChopstickClack();
   }
+
+  // Tiếng đạp cần khởi động / đề xe máy đời cũ: "Khặc khặc... Bành bành bành!"
+  playKickstartCough(started: boolean) {
+    const ctx = this.initCtx();
+    const now = ctx.currentTime;
+
+    // Starter crank "Khặc khặc"
+    [0, 0.11].forEach((offset, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(95 + idx * 18, now + offset);
+      osc.frequency.exponentialRampToValueAtTime(42, now + offset + 0.08);
+      gain.gain.setValueAtTime(0.35, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.09);
+      osc.connect(gain);
+      gain.connect(this.out(ctx));
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.1);
+    });
+
+    if (started) {
+      // Exhaust pop "Bành bành bành!"
+      [0.24, 0.36, 0.47, 0.58].forEach((offset, i) => {
+        const pop = ctx.createOscillator();
+        const pGain = ctx.createGain();
+        pop.type = 'square';
+        const base = 110 + i * 22;
+        pop.frequency.setValueAtTime(base, now + offset);
+        pop.frequency.exponentialRampToValueAtTime(58, now + offset + 0.09);
+        pGain.gain.setValueAtTime(0.42, now + offset);
+        pGain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.1);
+        pop.connect(pGain);
+        pGain.connect(this.out(ctx));
+        pop.start(now + offset);
+        pop.stop(now + offset + 0.11);
+      });
+    }
+  }
+
+  // Tiếng vặn ga pô nổ giòn tan ("RÈN RÈN BÀNH BÀNH!")
+  playEngineRev(speedRatio = 0.5) {
+    const ctx = this.initCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    const startFreq = 85 + speedRatio * 140;
+    osc.frequency.setValueAtTime(startFreq, now);
+    osc.frequency.linearRampToValueAtTime(startFreq * 1.35, now + 0.14);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.008, now + 0.18);
+    osc.connect(gain);
+    gain.connect(this.out(ctx));
+    osc.start(now);
+    osc.stop(now + 0.19);
+  }
+
+  // Tiếng quên gạt chân chống (F) quệt mặt đường tóe lửa & trượt bánh xoè ("XOẸT! RẦM!")
+  playKickstandScrape() {
+    const ctx = this.initCtx();
+    const now = ctx.currentTime;
+
+    const scrape = ctx.createBufferSource();
+    scrape.buffer = this.noiseBuffer(ctx, 0.38);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2800, now);
+    bp.frequency.linearRampToValueAtTime(1400, now + 0.35);
+    bp.Q.value = 4.0;
+
+    const sGain = ctx.createGain();
+    sGain.gain.setValueAtTime(0.55, now);
+    sGain.gain.exponentialRampToValueAtTime(0.01, now + 0.38);
+
+    scrape.connect(bp);
+    bp.connect(sGain);
+    sGain.connect(this.out(ctx));
+    scrape.start(now);
+    scrape.stop(now + 0.39);
+
+    setTimeout(() => this.playChairFall(), 180);
+  }
+
+  // Tiếng xe ôm công nghệ phóng tới thắng "Kítttt!" trước cửa nhà
+  playGrabBrakeScreech() {
+    const ctx = this.initCtx();
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1650, now);
+    osc.frequency.exponentialRampToValueAtTime(680, now + 0.35);
+
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.008, now + 0.38);
+
+    osc.connect(gain);
+    gain.connect(this.out(ctx));
+    osc.start(now);
+    osc.stop(now + 0.4);
+  }
+
+  // Tiếng còi tuýt CSGT + Máy đo nồng độ cồn "TÍT TÍT TÍT — BÁO ĐỘNG ĐỎ 999 mg/L!"
+  playPoliceWhistleAndBreathalyzer(isAlarmBeepOnly = false) {
+    const ctx = this.initCtx();
+    const now = ctx.currentTime;
+
+    if (!isAlarmBeepOnly) {
+      // "Tuýt tuýt tuýt!" whistle
+      [0, 0.16, 0.32].forEach((offset) => {
+        const w = ctx.createOscillator();
+        const wGain = ctx.createGain();
+        w.type = 'sine';
+        w.frequency.setValueAtTime(2750, now + offset);
+        w.frequency.setValueAtTime(2950, now + offset + 0.05);
+        wGain.gain.setValueAtTime(0.32, now + offset);
+        wGain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.12);
+        w.connect(wGain);
+        wGain.connect(this.out(ctx));
+        w.start(now + offset);
+        w.stop(now + offset + 0.13);
+      });
+    }
+
+    // High-pitched digital breathalyzer red alert "TÍT TÍT TÍT TÍT!"
+    const baseDelay = isAlarmBeepOnly ? 0 : 0.48;
+    [0, 0.11, 0.22, 0.33].forEach((offset, idx) => {
+      const beep = ctx.createOscillator();
+      const bGain = ctx.createGain();
+      beep.type = 'square';
+      beep.frequency.setValueAtTime(idx === 3 ? 1980 : 1580, now + baseDelay + offset);
+      bGain.gain.setValueAtTime(0.26, now + baseDelay + offset);
+      bGain.gain.exponentialRampToValueAtTime(
+        0.008,
+        now + baseDelay + offset + (idx === 3 ? 0.24 : 0.08)
+      );
+      beep.connect(bGain);
+      bGain.connect(this.out(ctx));
+      beep.start(now + baseDelay + offset);
+      beep.stop(now + baseDelay + offset + (idx === 3 ? 0.25 : 0.09));
+    });
+  }
 }
 
 export const sound = new SoundEngine();

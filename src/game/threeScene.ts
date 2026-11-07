@@ -64,6 +64,12 @@ import {
   FoodDish,
   IKHandControlState,
 } from './types';
+import {
+  createCommute3DWorld,
+  Commute3DController,
+  Commute3DState,
+  DEFAULT_COMMUTE_3D_STATE,
+} from './commute3DScene';
 
 export interface SceneController {
   mount: (container: HTMLDivElement) => void;
@@ -124,6 +130,8 @@ export interface SceneController {
   getCameraYaw: () => number;
   /** 'low' drops pixel ratio to 1 and disables shadows for weak devices. */
   setGraphicsQuality: (quality: 'low' | 'high') => void;
+  /** Updates the 3D Commute & FPP/TPP Motorbike Driving world inside Three.js. */
+  updateCommute3DState: (partial: Partial<Commute3DState>) => void;
 }
 
 export type LobbyMode = 'off' | 'lobby' | 'wardrobe';
@@ -273,6 +281,9 @@ export function initThreeScene(): SceneController {
 
   // 3D Lobby state
   let lobbyMode: LobbyMode = 'off';
+  let commute3DWorld: Commute3DController | null = null;
+  let commute3DState: Commute3DState = { ...DEFAULT_COMMUTE_3D_STATE };
+  let lastCommuteStage = commute3DState.stage;
   const lobbyEmptyStools: THREE.Group[] = [];
   let wardrobeSet: THREE.Group | null = null;
   const lobbyWaypoints = new Map<string, { x: number; z: number }[]>();
@@ -390,6 +401,10 @@ export function initThreeScene(): SceneController {
     // Saigon street around the pub: shophouses, sky, road, electric poles, street lamps
     streetBackdrop = createStreetBackdrop();
     scene.add(streetBackdrop.group);
+
+    // 3D Commute Corridor (Tube House Gate at Z=32 -> Alley Obstacles -> Pub Curb at Z=5.8)
+    commute3DWorld = createCommute3DWorld();
+    scene.add(commute3DWorld.root);
 
     const keyLight = new THREE.DirectionalLight(0xfef08a, 1.8);
     keyLight.position.set(3, 6, 4);
@@ -2013,30 +2028,63 @@ export function initThreeScene(): SceneController {
       camera.updateProjectionMatrix();
     }
 
-    // Mouse look: reset when the camera mode changes, then rotate the mode's framing
-    if (lobbyMode === 'off') {
-      if (activeCamMode !== lastLookCamMode) {
-        lastLookCamMode = activeCamMode;
-        camYaw = 0;
-        camPitch = 0;
+    const isCommute3DCamera =
+      lobbyMode === 'off' &&
+      commute3DWorld != null &&
+      commute3DWorld.update(time, rawDelta, commute3DState, camera, _camTargetPos, _camLookAt);
+
+    if (isCommute3DCamera) {
+      if (commute3DState.stage !== lastCommuteStage) {
+        lastCommuteStage = commute3DState.stage;
+        camera.position.copy(_camTargetPos);
+        _currentLookAt.copy(_camLookAt);
+      } else {
+        camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, 24, rawDelta);
+        camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, 24, rawDelta);
+        camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, 28, rawDelta);
+        _currentLookAt.x = THREE.MathUtils.damp(_currentLookAt.x, _camLookAt.x, 24, rawDelta);
+        _currentLookAt.y = THREE.MathUtils.damp(_currentLookAt.y, _camLookAt.y, 24, rawDelta);
+        _currentLookAt.z = THREE.MathUtils.damp(_currentLookAt.z, _camLookAt.z, 28, rawDelta);
       }
-      if (slowMoTimer <= 0 && (camYaw !== 0 || camPitch !== 0)) {
-        applyMouseLook(activeCamMode === 'first_person');
+      camera.lookAt(_currentLookAt);
+      // Apply 3D camera roll when leaning into turns in FPP or swaying drunk on return trip
+      if (
+        commute3DState.stage === 'outbound_fpp_drive' ||
+        commute3DState.stage === 'return_drunk_fpp_drive'
+      ) {
+        const leanRoll = -commute3DState.steerInput * 0.085;
+        const drunkRoll =
+          commute3DState.stage === 'return_drunk_fpp_drive'
+            ? Math.sin(time * 2.7) * 0.14
+            : 0;
+        camera.rotation.z += leanRoll + drunkRoll;
       }
+    } else {
+      // Mouse look: reset when the camera mode changes, then rotate the mode's framing
+      if (lobbyMode === 'off') {
+        if (activeCamMode !== lastLookCamMode) {
+          lastLookCamMode = activeCamMode;
+          camYaw = 0;
+          camPitch = 0;
+        }
+        if (slowMoTimer <= 0 && (camYaw !== 0 || camPitch !== 0)) {
+          applyMouseLook(activeCamMode === 'first_person');
+        }
+      }
+
+      const posRate = pointerLocked ? 14 : 5;
+      const lookRate = pointerLocked ? 16 : 6;
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, posRate, rawDelta);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, posRate, rawDelta);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, posRate, rawDelta);
+
+      _currentLookAt.x = THREE.MathUtils.damp(_currentLookAt.x, _camLookAt.x, lookRate, rawDelta);
+      _currentLookAt.y = THREE.MathUtils.damp(_currentLookAt.y, _camLookAt.y, lookRate, rawDelta);
+      _currentLookAt.z = THREE.MathUtils.damp(_currentLookAt.z, _camLookAt.z, lookRate, rawDelta);
+      camera.lookAt(_currentLookAt);
     }
 
-    const posRate = pointerLocked ? 14 : 5;
-    const lookRate = pointerLocked ? 16 : 6;
-    camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, posRate, rawDelta);
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, posRate, rawDelta);
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, posRate, rawDelta);
-
-    _currentLookAt.x = THREE.MathUtils.damp(_currentLookAt.x, _camLookAt.x, lookRate, rawDelta);
-    _currentLookAt.y = THREE.MathUtils.damp(_currentLookAt.y, _camLookAt.y, lookRate, rawDelta);
-    _currentLookAt.z = THREE.MathUtils.damp(_currentLookAt.z, _camLookAt.z, lookRate, rawDelta);
-    camera.lookAt(_currentLookAt);
-
-    if (pointerLocked && lobbyMode === 'off') updateCrosshairAim();
+    if (pointerLocked && lobbyMode === 'off' && !isCommute3DCamera) updateCrosshairAim();
 
     streetBackdrop?.update(time);
 
@@ -2644,6 +2692,10 @@ export function initThreeScene(): SceneController {
 
     setUserDrunkLevel: (level: number) => {
       userDrunkLevel = level;
+    },
+
+    updateCommute3DState: (partial: Partial<Commute3DState>) => {
+      commute3DState = { ...commute3DState, ...partial };
     },
 
     set onToothClick(cb: (index: number) => void) {

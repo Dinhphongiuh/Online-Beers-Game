@@ -337,7 +337,7 @@ export function createStreetBackdrop(): StreetBackdrop {
       }
     `,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyMat);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(90, 32, 16), skyMat);
   sky.renderOrder = -10;
   group.add(sky);
 
@@ -346,24 +346,24 @@ export function createStreetBackdrop(): StreetBackdrop {
     const theta = rand() * Math.PI * 2;
     const phi = 0.15 + rand() * 1.1;
     starPos.push(
-      Math.cos(theta) * Math.cos(phi) * 38,
-      Math.sin(phi) * 38,
-      Math.sin(theta) * Math.cos(phi) * 38
+      Math.cos(theta) * Math.cos(phi) * 85,
+      Math.sin(phi) * 85,
+      Math.sin(theta) * Math.cos(phi) * 85
     );
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
   const stars = new THREE.Points(
     starGeo,
-    new THREE.PointsMaterial({ color: 0xffffff, size: 0.14, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 })
+    new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 })
   );
   group.add(stars);
 
   const moon = new THREE.Mesh(
-    new THREE.CircleGeometry(1.4, 32),
+    new THREE.CircleGeometry(2.2, 32),
     new THREE.MeshBasicMaterial({ color: 0xfff7d6, fog: false })
   );
-  moon.position.set(-14, 17, -30);
+  moon.position.set(-18, 24, -42);
   moon.lookAt(0, 2, 0);
   group.add(moon);
 

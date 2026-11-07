@@ -9,33 +9,29 @@ type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 
 /** Shows the 3D lobby first, then swaps to the match behind a beer-foam wipe. */
 export default function Root() {
-  const isAutostart =
+  const isLobbyExplicit =
     typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('autostart') === '1';
+    new URLSearchParams(window.location.search).get('lobby') === '1';
 
-  const [phase, setPhase] = useState<Phase>(isAutostart ? 'game' : 'menu');
-  const [config, setConfig] = useState<LobbyConfig | null>(() =>
-    isAutostart
-      ? {
-          playerName: INITIAL_PLAYERS[0].name,
-          skin: {
-            avatar: INITIAL_PLAYERS[0].avatar,
-            clothing: INITIAL_PLAYERS[0].clothing,
-            hat: INITIAL_PLAYERS[0].hat,
-            glassType: INITIAL_PLAYERS[0].glassType,
-          },
-          squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
-          roomCode: '4089',
-          theme: 'sidewalk',
-          drunkSpeed: 'toi_ben',
-          rules: {
-            micDzo: false,
-            randomEvents: false,
-            billBrawl: true,
-          },
-        }
-      : null
-  );
+  const [phase, setPhase] = useState<Phase>(isLobbyExplicit ? 'menu' : 'game');
+  const [config, setConfig] = useState<LobbyConfig | null>(() => ({
+    playerName: INITIAL_PLAYERS[0].name,
+    skin: {
+      avatar: INITIAL_PLAYERS[0].avatar,
+      clothing: INITIAL_PLAYERS[0].clothing,
+      hat: INITIAL_PLAYERS[0].hat,
+      glassType: INITIAL_PLAYERS[0].glassType,
+    },
+    squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
+    roomCode: '4089',
+    theme: 'sidewalk',
+    drunkSpeed: 'toi_ben',
+    rules: {
+      micDzo: false,
+      randomEvents: false,
+      billBrawl: true,
+    },
+  }));
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [userSession, setUserSession] = useState<AuthUserSession | null>(null);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
@@ -147,9 +143,12 @@ export default function Root() {
         >
           <div className="absolute inset-0 foam-wipe flex flex-col">
             <div className="foam-head h-24 -mb-10 shrink-0" />
-            <div className="foam-body flex-1 flex items-center justify-center">
-              <div className="font-neon text-6xl sm:text-8xl text-white drop-shadow-[0_4px_0_rgba(146,64,14,0.8)] rotate-[-4deg]">
-                DZÔÔÔ!
+            <div className="foam-body flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
+              <div className="font-neon text-5xl sm:text-7xl text-white drop-shadow-[0_4px_0_rgba(146,64,14,0.8)] rotate-[-3deg]">
+                LOADING 100% • DZÔÔÔ!
+              </div>
+              <div className="px-4 py-2 rounded-2xl bg-zinc-950/85 border-2 border-amber-300 text-amber-200 font-black text-xs sm:text-sm shadow-xl">
+                🏠➔🛵 Đang mở Bản Đồ Khu Phố Đêm 3D: Xuất phát từ Căn Nhà Ống Trong Hẻm (Cách quán 250m)...
               </div>
             </div>
           </div>

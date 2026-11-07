@@ -49,6 +49,8 @@ export interface IUser extends Document {
   foodEatenCount: number;
   gamesWon: number;
   timesPassedOut: number;
+  bikeImpoundMatchesLeft?: number;
+  selectedBikeSkin?: string;
   isGuest: boolean;
   roomPin?: string;
   lastLogin: Date;
@@ -102,6 +104,8 @@ export interface IPlayerProfile extends Document {
   foodEatenCount: number;
   gamesWon: number;
   timesPassedOut: number;
+  bikeImpoundMatchesLeft?: number;
+  selectedBikeSkin?: string;
   lastActive: Date;
 }
 
@@ -167,6 +171,8 @@ const PlayerProfileSchema = new Schema<IPlayerProfile>(
     foodEatenCount: { type: Number, default: 0 },
     gamesWon: { type: Number, default: 0 },
     timesPassedOut: { type: Number, default: 0 },
+    bikeImpoundMatchesLeft: { type: Number, default: 0 },
+    selectedBikeSkin: { type: String, default: 'dream_chien' },
     lastActive: { type: Date, default: Date.now },
   },
   { timestamps: true }
@@ -206,6 +212,8 @@ const UserSchema = new Schema<IUser>(
     foodEatenCount: { type: Number, default: 0 },
     gamesWon: { type: Number, default: 0 },
     timesPassedOut: { type: Number, default: 0 },
+    bikeImpoundMatchesLeft: { type: Number, default: 0 },
+    selectedBikeSkin: { type: String, default: 'dream_chien' },
     isGuest: { type: Boolean, default: false },
     roomPin: { type: String },
     lastLogin: { type: Date, default: Date.now },

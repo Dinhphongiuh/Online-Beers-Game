@@ -41,6 +41,9 @@ export interface Player {
   isHeartbrokenMaiAnh?: boolean; // Phi Quân bị Mai Anh mắng & block, suy tình tại bàn
   isClimbingTree?: boolean;   // Riêng NPC Khoa Nguyễn (Gấu Nâu) đạt >=80% cồn đi ra leo cây xanh
   isColaOnlyDestroyer?: boolean; // Riêng NPC Nga Phan (Hamster đuôi dài): chỉ uống Coca & phá mồi, 0% cồn
+  bikeImpoundMatchesLeft?: number; // Số trận xe máy còn bị giam ở đồn CSGT (2 trận khi bị bắt thổi cồn)
+  selectedBikeSkin?: 'dream_chien' | 'wave_do_po' | 'cub_50'; // Skin xe máy trong Tủ Đồ / Garage
+  commuteModeUsed?: 'self_bike' | 'grab_vip'; // Phương tiện đã chọn đầu trận
 }
 
 export type DrinkTierId =

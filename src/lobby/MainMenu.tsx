@@ -407,11 +407,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     setPanel('none');
     sound.stopMicCheers();
     sound.playCrowdDzo();
+    const effectiveSquadIds =
+      squad.length > 0
+        ? [...squad].sort((a, b) => a.seatIndex - b.seatIndex).map((m) => m.id)
+        : crew.map((c) => c.id);
     onStart(
       {
         playerName: name.trim() || 'Bợm Nhậu',
         skin,
-        squadIds: [...squad].sort((a, b) => a.seatIndex - b.seatIndex).map((m) => m.id),
+        squadIds: effectiveSquadIds,
         theme: map,
         drunkSpeed,
         rules,
@@ -419,22 +423,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       },
       graphics
     );
-  }, [starting, name, skin, squad, map, drunkSpeed, rules, roomCode, graphics, onStart]);
+  }, [starting, name, skin, squad, crew, map, drunkSpeed, rules, roomCode, graphics, onStart]);
 
   // Quick play / join: start automatically once the table fills up and everyone is ready
   useEffect(() => {
     if (pendingStart && everyoneReady) {
-      later(startMatch, 900);
+      later(startMatch, 400);
       setPendingStart(false);
     }
   }, [pendingStart, everyoneReady, startMatch, later]);
 
   const handleQuickPlay = () => {
     sound.playBottleOpen();
-    setReady((prev) => ({ ...prev, user: true }));
-    const coming = inviteWholeCrew();
-    showToast(coming > 0 ? '🛵 Đang ghép bàn… chiến hữu đang chạy tới!' : '🍻 Đủ người rồi, chuẩn bị DZÔ!');
-    setPendingStart(true);
+    showToast('🏠➔🛵 Đang khởi hành từ căn nhà ống trong hẻm ra quán nhậu!');
+    startMatch();
   };
 
   const handleToggleReady = () => {
@@ -443,15 +445,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   };
 
   const handleStartButton = () => {
-    if (squad.length === 0) {
-      handleQuickPlay();
-      return;
-    }
-    if (!everyoneReady) {
-      sound.playHiccup();
-      showToast('⏳ Chờ cả bàn bấm "Lên Mồi!" đã nha!');
-      return;
-    }
     startMatch();
   };
 
@@ -796,6 +789,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <button
             {...sfx}
+            data-testid="mainmenu-start-commute-btn"
             onClick={handleQuickPlay}
             disabled={starting}
             className="beer-button w-full mt-2 rounded-xl px-4 py-3.5 text-left cursor-pointer shadow-[0_6px_0_#92400e] active:translate-y-1 active:shadow-[0_2px_0_#92400e] transition-transform"
@@ -803,8 +797,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             {[10, 24, 41, 58, 73, 88].map((left, i) => (
               <span key={i} className="beer-bubble" style={{ left: `${left}%`, animationDelay: `${i * 0.17}s` }} />
             ))}
-            <span className="relative block font-neon text-lg sm:text-xl text-red-900 leading-tight">🍺 VÀO BÀN NHẬU NGAY</span>
-            <span className="relative block text-[10px] font-black text-red-900/70 tracking-widest">QUICK PLAY • GHÉP BÀN TỰ ĐỘNG</span>
+            <span className="relative block font-neon text-lg sm:text-xl text-red-900 leading-tight">
+              🛵 KHỞI HÀNH TỪ NHÀ RA QUÁN!
+            </span>
+            <span className="relative block text-[10px] font-black text-red-900/80 tracking-wider">
+              GIAI ĐOẠN 1 (SPAWN PHASE): Ở NHÀ ➔ RA QUÁN ➔ NHẬU TỚI BẾN
+            </span>
           </button>
 
           <div
@@ -864,6 +862,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-[15.75rem] md:bottom-6 md:left-[calc(50%+170px)] flex flex-col items-center gap-1.5">
           <button
             {...sfx}
+            data-testid="mainmenu-bottom-start-btn"
             onClick={handleStartButton}
             className={`font-neon whitespace-nowrap px-6 py-3 rounded-2xl text-lg shadow-2xl cursor-pointer transition active:scale-95 border-2 ${
               everyoneReady || squad.length === 0
@@ -871,12 +870,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                 : 'bg-zinc-800/90 border-zinc-600 text-zinc-400'
             }`}
           >
-            {squad.length === 0 ? '🛵 Ghép Bàn & Nhậu!' : '🍻 BẮT ĐẦU NHẬU!'}
+            {squad.length === 0 ? '🏠➔🛵 Xuất Phát Từ Nhà Ra Quán!' : '🍻 KHỞI HÀNH & NHẬU!'}
           </button>
-          <div className="text-[10px] font-bold text-white/70 bg-black/40 rounded-full px-2.5 py-0.5">
+          <div className="text-[10px] font-bold text-amber-200 bg-black/75 border border-amber-500/40 rounded-full px-3 py-0.5">
             {squad.length === 0
-              ? 'Bấm dấu [+] trên ghế trống để rủ chiến hữu'
-              : `${squad.filter((m) => ready[m.id]).length + (ready.user ? 1 : 0)}/${squad.length + 1} người đã lên mồi`}
+              ? 'Giai đoạn 1: Bước ra từ cửa sắt kéo nhà ống trong hẻm (Cách quán 250m)'
+              : `${squad.filter((m) => ready[m.id]).length + (ready.user ? 1 : 0)}/${squad.length + 1} người đã sẵn sàng xuất phát`}
           </div>
         </div>
       )}
