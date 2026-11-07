@@ -30,34 +30,9 @@ import {
 import { createChibiCharacter, CharacterRig, CheersAnimPhase } from './characterModel';
 import { createStreetBackdrop, StreetBackdrop } from './environment';
 import { createFoodPlatter, createTableClutter } from './foodModels';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-
-// Tames specular fireflies / NaNs before bloom, otherwise one hot pixel blooms into a white blob
-const HdrClampShader = {
-  uniforms: { tDiffuse: { value: null }, maxValue: { value: 3.0 } },
-  vertexShader: /* glsl */ `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse;
-    uniform float maxValue;
-    varying vec2 vUv;
-    void main() {
-      vec4 c = texture2D(tDiffuse, vUv);
-      if (any(isnan(c.rgb)) || any(isinf(c.rgb))) c.rgb = vec3(0.0);
-      c.rgb = min(c.rgb, vec3(maxValue));
-      gl_FragColor = c;
-    }
-  `,
-};
+import { createDrunkVisionPipeline, DrunkVisionPipeline } from './drunkVision';
+import { loadRapier, TablePhysics, type CharacterProxy } from './physics';
+import type { PropSnapshot } from '../../shared/tableNet';
 import {
   Player,
   MinigameId,
@@ -100,6 +75,8 @@ export interface SceneController {
   pressCrocodileTooth: (toothIndex: number, isTrap: boolean) => void;
   resetCrocodile: () => void;
   setUserDrunkLevel: (level: number) => void;
+  /** Cinematic depth-of-field pull (bill slapped in the face, breathalyzer cutscene...). */
+  setVisionFocusPull: (on: boolean) => void;
   onToothClick?: (index: number) => void;
   onFoodClick?: (type: string) => void;
   onBottleClick?: () => void;
@@ -132,6 +109,45 @@ export interface SceneController {
   setGraphicsQuality: (quality: 'low' | 'high') => void;
   /** Updates the 3D Commute & FPP/TPP Motorbike Driving world inside Three.js. */
   updateCommute3DState: (partial: Partial<Commute3DState>) => void;
+  // ---- Rapier table physics (cans, bottles, dép tổ ong) ----
+  /** Fist on the table: loose cans & bottles hop (strength ~0.5 - 1.5). */
+  physicsSlam: (strength?: number) => void;
+  /**
+   * Lật bàn: launch every can and bottle off the table. A remote flip only shakes the
+   * table here; the flipper owns the props and streams where they land.
+   */
+  physicsFlipTable: (fromRemote?: boolean) => void;
+  /** Puts the cans back on the table. */
+  physicsResetProps: () => void;
+  /** A slipper thrown by someone else at the table (from their origin/velocity). */
+  spawnRemoteSlipper: (origin: [number, number, number], velocity: [number, number, number]) => void;
+  /** Transforms streamed by the prop's current owner. */
+  applyRemoteProps: (props: PropSnapshot[]) => void;
+  /** Our owned props' transforms, ~15 Hz, to stream to the table. */
+  onPhysicsSnapshot?: (props: PropSnapshot[]) => void;
+  /** We threw a physical slipper (broadcast it so others simulate it too). */
+  onLocalSlipperThrown?: (origin: [number, number, number], velocity: [number, number, number]) => void;
+  /** Our slipper actually bonked somebody's head. */
+  onSlipperHit?: (playerId: string) => void;
+  /** Network poses of remote humans (by player id); seated ones stay on their stool. */
+  setRemotePoses: (poses: Record<string, RemotePose>) => void;
+  /** Screen-space head anchors (px, relative to the mount div) for overhead HTML bubbles. */
+  getPlayerHeadAnchors: () => PlayerHeadAnchor[];
+}
+
+export interface RemotePose {
+  x: number;
+  z: number;
+  angle: number;
+  roaming: boolean;
+  moving: boolean;
+}
+
+export interface PlayerHeadAnchor {
+  playerId: string;
+  x: number;
+  y: number;
+  onScreen: boolean;
 }
 
 export type LobbyMode = 'off' | 'lobby' | 'wardrobe';
@@ -294,9 +310,10 @@ export function initThreeScene(): SceneController {
   let onResizeHandler: (() => void) | null = null;
   let streetBackdrop: StreetBackdrop | null = null;
   // Bloom makes neon, lit windows and street lamps glow ("Đẹp" graphics only)
-  let composer: EffectComposer | null = null;
-  let bloomPass: UnrealBloomPass | null = null;
+  // pmndrs/postprocessing: bloom + "Quắc Cần Câu" drunk vision (see drunkVision.ts)
+  let composer: DrunkVisionPipeline | null = null;
   let bloomEnabled = true;
+  let focusPullOverride = false;
 
   // Mouse look (Pointer Lock): yaw orbits around the look target, pitch tilts it
   let pointerLocked = false;
@@ -313,6 +330,38 @@ export function initThreeScene(): SceneController {
   const _tablePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.98);
   const _aimHit = new THREE.Vector3();
   const _lookOffset = new THREE.Vector3();
+
+  // Remote humans' network poses (Colyseus)
+  let remotePoses: Record<string, RemotePose> = {};
+
+  // Rapier physics (lazy WASM load after mount)
+  let tablePhysics: TablePhysics | null = null;
+  let sceneDestroyed = false;
+  let onPhysicsSnapshotCb: ((props: PropSnapshot[]) => void) | undefined;
+  let onLocalSlipperThrownCb:
+    | ((origin: [number, number, number], velocity: [number, number, number]) => void)
+    | undefined;
+  let onSlipperHitCb: ((playerId: string) => void) | undefined;
+  const _charProxies: CharacterProxy[] = [];
+
+  /** Ballistic slipper from the user's hand to a head, with drunk aim wobble. */
+  function computeSlipperShot(target: THREE.Vector3) {
+    const userEntry = playerRigs.get('user');
+    const from = userEntry ? userEntry.rig.root.position : new THREE.Vector3(0, 0, 1.95);
+    const origin: [number, number, number] = [from.x, from.y + 1.35, from.z - 0.25];
+    const dx = target.x - origin[0];
+    const dy = target.y + 1.15 - origin[1];
+    const dz = target.z - origin[2];
+    const dist = Math.hypot(dx, dz);
+    const T = THREE.MathUtils.clamp(dist / 7.5, 0.3, 0.85);
+    const spread = (userDrunkLevel / 100) * 1.6;
+    const velocity: [number, number, number] = [
+      dx / T + (Math.random() - 0.5) * spread,
+      dy / T + 0.5 * 9.81 * T + (Math.random() - 0.5) * spread * 0.5,
+      dz / T + (Math.random() - 0.5) * spread,
+    ];
+    return { origin, velocity };
+  }
 
   // Player rigs mapped by player id
   const playerRigs = new Map<string, { rig: CharacterRig; stool: THREE.Group; player: Player }>();
@@ -1832,6 +1881,17 @@ export function initThreeScene(): SceneController {
           currentIKState,
           extraState
         );
+      } else if (player.isRemote && remotePoses[player.id]?.roaming) {
+        // Remote human walking around: chase the latest network pose (20 Hz) smoothly
+        const pose = remotePoses[player.id];
+        rig.root.position.x = THREE.MathUtils.damp(rig.root.position.x, pose.x, 10, rawDelta);
+        rig.root.position.z = THREE.MathUtils.damp(rig.root.position.z, pose.z, 10, rawDelta);
+        rig.root.position.y = pose.moving ? Math.abs(Math.sin(time * 14)) * 0.08 : 0;
+        let dAngle = pose.angle - rig.root.rotation.y;
+        dAngle = Math.atan2(Math.sin(dAngle), Math.cos(dAngle));
+        rig.root.rotation.y += dAngle * Math.min(1, rawDelta * 12);
+        extraState.isWalkingToTree = pose.moving;
+        rig.update(delta, player.alcoholLevel, player.isPassedOut, isCheersing, undefined, extraState);
       } else {
         // Check if this NPC is currently being dragged/carried by the user ("The Wingman Carry")
         const userEntry = playerRigs.get('user');
@@ -1914,6 +1974,22 @@ export function initThreeScene(): SceneController {
         );
       } else {
         nhapMoiSpotlight.visible = false;
+      }
+    }
+
+    // Rapier table props: cans, bottles & flying slippers
+    if (tablePhysics) {
+      const inMatch = lobbyMode === 'off';
+      tablePhysics.group.visible = inMatch;
+      if (inMatch) {
+        _charProxies.length = 0;
+        playerRigs.forEach(({ rig, player }) => {
+          if (player.isUser) return; // never bonk yourself with your own throw
+          const r = rig.root.position;
+          _charProxies.push({ id: player.id, x: r.x, y: r.y, z: r.z });
+        });
+        tablePhysics.setCharacters(_charProxies);
+        tablePhysics.step(rawDelta);
       }
     }
 
@@ -2088,7 +2164,27 @@ export function initThreeScene(): SceneController {
 
     streetBackdrop?.update(time);
 
-    if (composer && bloomEnabled) composer.render(rawDelta);
+    if (composer && bloomEnabled) {
+      const isDrunkRide = commute3DState.stage === 'return_drunk_fpp_drive';
+      const commuteAlcohol = commute3DState.active ? commute3DState.alcoholLevel : 0;
+      composer.update(
+        {
+          alcohol: Math.max(userDrunkLevel, isDrunkRide ? commuteAlcohol : 0),
+          clearEyes: lobbyMode !== 'off' || isColdTowelClear,
+          focusPull:
+            lobbyMode === 'off' &&
+            (focusPullOverride ||
+              currentIKState.isFaceplanted ||
+              userDrunkLevel >= 100 ||
+              commute3DState.stage === 'checkpoint_20m_breathalyzer_qte'),
+          focusDistance: commute3DState.stage === 'checkpoint_20m_breathalyzer_qte' ? 0.6 : 1.3,
+          drivingBoost: isDrunkRide ? 1.35 : 1,
+        },
+        time,
+        rawDelta
+      );
+      composer.render(rawDelta);
+    }
     else renderer.render(scene, camera);
 
     if (isSoftwareGl) {
@@ -2147,25 +2243,25 @@ export function initThreeScene(): SceneController {
 
       setupScene();
 
+      // Physics WASM loads in the background; the table works without it until then
+      loadRapier()
+        .then((R) => {
+          if (sceneDestroyed || !scene) return;
+          const tag = Math.random().toString(36).slice(2, 7);
+          tablePhysics = new TablePhysics(R, tag);
+          tablePhysics.onSnapshot = (props) => onPhysicsSnapshotCb?.(props);
+          tablePhysics.onSlipperHit = (id) => onSlipperHitCb?.(id);
+          scene.add(tablePhysics.group);
+        })
+        .catch((err) => console.warn('[physics] Rapier failed to load', err));
+
       // Studio Reflection via RoomEnvironment
       const pmrem = new THREE.PMREMGenerator(renderer);
       scene!.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
       pmrem.dispose();
 
       if (!isSoftwareGl) {
-        composer = new EffectComposer(renderer);
-        composer.addPass(new RenderPass(scene!, camera!));
-        composer.addPass(new ShaderPass(HdrClampShader));
-        bloomPass = new UnrealBloomPass(
-          new THREE.Vector2(mountDiv.clientWidth / 2, mountDiv.clientHeight / 2),
-          1.6, // strength
-          0.35, // radius
-          // Lit surfaces under the table spotlight reach ~2.5; emissives get clamped to 3.0,
-          // so only neon, bulbs, signs and lamps cross this threshold
-          2.92
-        );
-        composer.addPass(bloomPass);
-        composer.addPass(new OutputPass());
+        composer = createDrunkVisionPipeline(renderer, scene!, camera!, 1.15);
       }
 
       const onResize = () => {
@@ -2190,6 +2286,10 @@ export function initThreeScene(): SceneController {
     },
 
     destroy: () => {
+      sceneDestroyed = true;
+      commute3DWorld?.dispose();
+      tablePhysics?.dispose();
+      tablePhysics = null;
       if (isSoftwareGl) {
         clearTimeout(frameId);
       } else {
@@ -2367,14 +2467,79 @@ export function initThreeScene(): SceneController {
 
     getCameraYaw: () => camYaw,
 
+    setVisionFocusPull: (on: boolean) => {
+      focusPullOverride = on;
+    },
+
+    physicsSlam: (strength = 1) => {
+      tablePhysics?.slam(strength);
+      tableSlamJoltTimer = Math.max(tableSlamJoltTimer, 0.5);
+    },
+
+    physicsFlipTable: (fromRemote = false) => {
+      if (!fromRemote) tablePhysics?.flip();
+      tableSlamJoltTimer = 0.85;
+      burstFoam(0, 1.08, 0);
+    },
+
+    physicsResetProps: () => {
+      tablePhysics?.reset();
+    },
+
+    spawnRemoteSlipper: (origin, velocity) => {
+      tablePhysics?.throwSlipper(origin, velocity, { local: false });
+    },
+
+    applyRemoteProps: (props) => {
+      tablePhysics?.applyRemote(props);
+    },
+
+    set onPhysicsSnapshot(cb: ((props: PropSnapshot[]) => void) | undefined) {
+      onPhysicsSnapshotCb = cb;
+    },
+
+    set onLocalSlipperThrown(
+      cb: ((origin: [number, number, number], velocity: [number, number, number]) => void) | undefined
+    ) {
+      onLocalSlipperThrownCb = cb;
+    },
+
+    set onSlipperHit(cb: ((playerId: string) => void) | undefined) {
+      onSlipperHitCb = cb;
+    },
+
+    setRemotePoses: (poses: Record<string, RemotePose>) => {
+      remotePoses = poses;
+    },
+
+    getPlayerHeadAnchors: () => {
+      const anchors: PlayerHeadAnchor[] = [];
+      if (!camera || !container) return anchors;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      playerRigs.forEach(({ rig, player }) => {
+        const r = rig.root.position;
+        _projVec.set(r.x, r.y + 1.75, r.z);
+        _projVec.project(camera!);
+        anchors.push({
+          playerId: player.id,
+          x: ((_projVec.x + 1) / 2) * w,
+          y: ((1 - _projVec.y) / 2) * h,
+          onScreen: _projVec.z < 1 && Math.abs(_projVec.x) <= 1.1 && Math.abs(_projVec.y) <= 1.1,
+        });
+      });
+      return anchors;
+    },
+
     setGraphicsQuality: (quality: 'low' | 'high') => {
       if (!renderer) return;
       const low = quality === 'low' || isSoftwareGl;
       renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, 2));
       renderer.shadowMap.enabled = !low;
       bloomEnabled = !low;
+      // The composer tone-maps in its own pass; the direct render path needs the renderer to
+      renderer.toneMapping = composer && bloomEnabled ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
       if (composer && container) {
-        composer.setPixelRatio(renderer.getPixelRatio());
         composer.setSize(container.clientWidth, container.clientHeight);
       }
       scene?.traverse((obj) => {
@@ -2490,6 +2655,12 @@ export function initThreeScene(): SceneController {
 
       // Pick the friend closest to the current aimX direction
       const chosen = bots[Math.floor(Math.random() * bots.length)];
+      if (tablePhysics) {
+        const shot = computeSlipperShot(chosen.pos);
+        tablePhysics.throwSlipper(shot.origin, shot.velocity, { local: true });
+        onLocalSlipperThrownCb?.(shot.origin, shot.velocity);
+        return chosen.name;
+      }
       throwAnim.start.set(currentIKState.aimX * 0.4, 1.15, 1.45);
       throwAnim.end.copy(chosen.pos);
       throwAnim.end.y += 1.08; // Head height
@@ -2526,6 +2697,7 @@ export function initThreeScene(): SceneController {
       voteReactionTimers.set(playerId, { vote, timer: 3.2 });
       if (vote === 'no') {
         tableSlamJoltTimer = 0.85;
+        tablePhysics?.slam(0.9);
         burstFoam(0, 1.08, 0);
       }
     },

@@ -2,6 +2,11 @@
 import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
+import http from 'http';
+import { Server as ColyseusServer } from '@colyseus/core';
+import { WebSocketTransport } from '@colyseus/ws-transport';
+import { TableRoom } from './server/tableRoom.ts';
+import { TABLE_ROOM_NAME } from './shared/tableNet.ts';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -596,6 +601,47 @@ app.post('/api/rooms/:roomId/game-record', async (req, res) => {
   }
 });
 
+// POST "Biên Bản Cuối Buổi": end-of-night report into the Hộ Chiếu Tửu Lượng
+app.post('/api/players/:playerId/night-report', async (req, res) => {
+  const b = req.body ?? {};
+  const num = (v: unknown, min: number, max: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : 0;
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+  try {
+    // Signed-in players keep their passport under their account id
+    let targetId = String(req.params.playerId || '').slice(0, 64) || 'guest';
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const rawSession = await redis.get(`session:${authHeader.substring(7).trim()}`).catch(() => null);
+      const session = rawSession ? JSON.parse(rawSession) : null;
+      if (session?.userId) targetId = String(session.userId);
+    }
+
+    const report = {
+      roomId: str(b.roomId, 40),
+      score: Math.round(num(b.score, 0, 100000)),
+      rankTitle: str(b.rankTitle, 60),
+      endingKind: str(b.endingKind, 30),
+      durationMinutes: Math.round(num(b.durationMinutes, 0, 24 * 60)),
+      drinks: Math.round(num(b.drinks, 0, 999)),
+      peakAlcohol: Math.round(num(b.peakAlcohol, 0, 100)),
+      slipperHits: Math.round(num(b.slipperHits, 0, 999)),
+      loudestDzoDb: Math.round(num(b.loudestDzoDb, 0, 140)),
+      billShare: Math.round(num(b.billShare, 0, 1e9)),
+      createdAt: new Date(),
+    };
+    const profile = await dbService.addNightReport(targetId, str(b.playerName, 32), report, {
+      drinks: report.drinks,
+      timesPassedOut: Math.round(num(b.timesPassedOut, 0, 99)),
+      coinsReward: Math.round(num(b.coinsReward, 0, 10000)),
+    });
+    res.json({ success: true, profile });
+  } catch (error) {
+    sendServerError(res, error, 'Failed to save night report');
+  }
+});
+
 // POST record commute outcome (Pre/Post-Match Commute Loop: Đi Tỉnh Về Quắc)
 app.post('/api/commute/record-outcome', async (req, res) => {
   const {
@@ -800,9 +846,17 @@ async function startServer() {
     });
   }
 
-  app.listen(Number(port), '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${port}`);
+  // Realtime tables (Colyseus over WebSocket) share the HTTP server with Express:
+  // /matchmake/* goes to Colyseus, everything else falls through to the Express app.
+  const httpServer = http.createServer(app);
+  const gameServer = new ColyseusServer({
+    transport: new WebSocketTransport({ server: httpServer }),
+    greet: false,
   });
+  gameServer.define(TABLE_ROOM_NAME, TableRoom).filterBy(['roomCode']);
+
+  await gameServer.listen(Number(port), '0.0.0.0');
+  console.log(`Server listening on http://0.0.0.0:${port} (Colyseus room "${TABLE_ROOM_NAME}")`);
 }
 
 startServer();

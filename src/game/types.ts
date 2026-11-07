@@ -14,6 +14,8 @@ export interface Player {
   id: string;
   name: string;
   isUser: boolean;
+  /** A real human at the same table over the network (Colyseus), not an NPC. */
+  isRemote?: boolean;
   avatar: CharacterAvatar;
   clothing: ClothingType;
   hat: HatType;

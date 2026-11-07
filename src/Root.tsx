@@ -9,29 +9,35 @@ type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 
 /** Shows the 3D lobby first, then swaps to the match behind a beer-foam wipe. */
 export default function Root() {
-  const isLobbyExplicit =
+  // Home menu first; the commute (house → alley → pub) starts once you enter the match.
+  // `?autostart=1` jumps straight into a default match (dev shortcut).
+  const isAutostart =
     typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('lobby') === '1';
+    new URLSearchParams(window.location.search).get('autostart') === '1';
 
-  const [phase, setPhase] = useState<Phase>(isLobbyExplicit ? 'menu' : 'game');
-  const [config, setConfig] = useState<LobbyConfig | null>(() => ({
-    playerName: INITIAL_PLAYERS[0].name,
-    skin: {
-      avatar: INITIAL_PLAYERS[0].avatar,
-      clothing: INITIAL_PLAYERS[0].clothing,
-      hat: INITIAL_PLAYERS[0].hat,
-      glassType: INITIAL_PLAYERS[0].glassType,
-    },
-    squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
-    roomCode: '4089',
-    theme: 'sidewalk',
-    drunkSpeed: 'toi_ben',
-    rules: {
-      micDzo: false,
-      randomEvents: false,
-      billBrawl: true,
-    },
-  }));
+  const [phase, setPhase] = useState<Phase>(isAutostart ? 'game' : 'menu');
+  const [config, setConfig] = useState<LobbyConfig | null>(() =>
+    isAutostart
+      ? {
+          playerName: INITIAL_PLAYERS[0].name,
+          skin: {
+            avatar: INITIAL_PLAYERS[0].avatar,
+            clothing: INITIAL_PLAYERS[0].clothing,
+            hat: INITIAL_PLAYERS[0].hat,
+            glassType: INITIAL_PLAYERS[0].glassType,
+          },
+          squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
+          roomCode: '4089',
+          theme: 'sidewalk',
+          drunkSpeed: 'toi_ben',
+          rules: {
+            micDzo: false,
+            randomEvents: false,
+            billBrawl: true,
+          },
+        }
+      : null
+  );
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [userSession, setUserSession] = useState<AuthUserSession | null>(null);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
@@ -114,6 +120,7 @@ export default function Root() {
           isLoggedIn={!!userSession}
           onAuthSuccess={handleAuthSuccess}
           onLogout={handleLogout}
+          onExitToMenu={() => setPhase('menu')}
         />
       ) : (
         <MainMenu

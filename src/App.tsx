@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Player,
   TableState,
@@ -19,6 +19,18 @@ import { sound } from './game/audio';
 import { TopBar } from './components/TopBar';
 import { BottomDock } from './components/BottomDock';
 import { DrunkEffectOverlay } from './components/DrunkEffectOverlay';
+import { TableNetHUD } from './components/TableNetHUD';
+import { toGamePlayer, useTableNet, remotePlayerId } from './net/useTableNet';
+import type { TableEventEnvelope } from '../shared/tableNet';
+import { VoiceChat, rmsToDecibel, type VoiceState } from './net/voiceChat';
+import { NightReportModal } from './components/NightReportModal';
+import {
+  buildNightReport,
+  createNightStats,
+  type NightEnding,
+  type NightReport,
+} from './game/nightReportLogic';
+import { getNetPlayerId } from './net/useTableNet';
 import { CameraAndControlsHUD } from './components/CameraAndControlsHUD';
 import { CrocodileGame } from './components/CrocodileGame';
 import { SpinBottleGame } from './components/SpinBottleGame';
@@ -287,6 +299,7 @@ export default function App({
   isLoggedIn = false,
   onAuthSuccess,
   onLogout,
+  onExitToMenu,
 }: {
   lobbyConfig?: LobbyConfig;
   graphics?: GraphicsQuality;
@@ -294,6 +307,8 @@ export default function App({
   isLoggedIn?: boolean;
   onAuthSuccess?: (session: AuthUserSession) => void;
   onLogout?: () => void;
+  /** End of the night: leave the table and go back to the home menu. */
+  onExitToMenu?: () => void;
 } = {}) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
@@ -502,7 +517,340 @@ export default function App({
     }, 3500);
   };
 
-  // Synchronize Room State to MongoDB & Redis Cache + Heartbeat presence
+  // ============================================================================
+  // REALTIME TABLE (Colyseus): other humans with the same PIN sit at this table
+  // ============================================================================
+  const netRoomCode = lobbyConfig?.roomCode ?? '8888';
+  const tableNet = useTableNet(
+    netRoomCode,
+    {
+      // "(Bạn)" is how YOU see yourself; friends should just see the name
+      name: userPlayer.name.replace(/\s*\(Bạn\)\s*/g, '').trim() || 'Bợm Nhậu',
+      avatar: userPlayer.avatar,
+      clothing: userPlayer.clothing,
+      hat: userPlayer.hat,
+      glassType: userPlayer.glassType,
+    },
+    {
+      onEvent: (e) => handleRemoteTableEvent(e),
+      onPlayerJoined: (p) => {
+        sound.playBottleOpen();
+        showToast(`🌐🍻 ${p.name} vừa kéo ghế nhựa ngồi vào bàn!`);
+      },
+      onPlayerLeft: (p) => showToast(`👋 ${p.name} đã rời bàn (chắc về trốn bill).`),
+    }
+  );
+  const remoteGamePlayers = useMemo(
+    () => tableNet.remotePlayers.map((p, i) => toGamePlayer(p, tableState.players.length + i)),
+    [tableNet.remotePlayers, tableState.players.length]
+  );
+  const scenePlayers = useMemo(
+    () => [...tableState.players, ...remoteGamePlayers],
+    [tableState.players, remoteGamePlayers]
+  );
+  const playersForHitRef = useRef(scenePlayers);
+  playersForHitRef.current = scenePlayers;
+
+  // Remote poses → scene (they walk around in free roam, otherwise sit on their stool)
+  useEffect(() => {
+    const poses: Record<string, { x: number; z: number; angle: number; roaming: boolean; moving: boolean }> = {};
+    tableNet.remotePlayers.forEach((p) => {
+      poses[remotePlayerId(p.sessionId)] = {
+        x: p.x,
+        z: p.z,
+        angle: p.angle,
+        roaming: p.roaming,
+        moving: p.moving,
+      };
+    });
+    sceneRef.current?.setRemotePoses(poses);
+  }, [tableNet.remotePlayers]);
+
+  // Local pose → network (throttled inside the client)
+  useEffect(() => {
+    const roaming = ikState.controlMode === 'free_roam';
+    tableNet.client?.sendPose({
+      x: ikState.freeRoamPos.x,
+      z: ikState.freeRoamPos.z,
+      angle: ikState.freeRoamPos.angle,
+      roaming,
+      moving: roaming && ikState.freeRoamPos.isMoving,
+    });
+  }, [tableNet.client, tableNet.connection, ikState.controlMode, ikState.freeRoamPos]);
+
+  // Local Độ Cồn → network
+  useEffect(() => {
+    tableNet.client?.sendStatus({
+      alcohol: userPlayer.alcoholLevel,
+      passedOut: userPlayer.isPassedOut,
+      drinks: userPlayer.drinksCount,
+    });
+  }, [
+    tableNet.client,
+    tableNet.connection,
+    userPlayer.alcoholLevel,
+    userPlayer.isPassedOut,
+    userPlayer.drinksCount,
+  ]);
+
+  function handleRemoteTableEvent(env: TableEventEnvelope) {
+    const ev = env.event;
+    switch (ev.kind) {
+      case 'cheers':
+        sound.playClink(1.1);
+        showToast(`🍻 ${env.fromName} giơ ly: "1, 2, 3 DZÔ!" — cả bàn cụng theo!`);
+        break;
+      case 'emote':
+        showToast(`${ev.emote} ${env.fromName}`);
+        break;
+      case 'dzo_shout':
+        sound.playCrowdDzo();
+        recordDzoShout(env.fromName, ev.decibel, false);
+        showToast(`📣 ${env.fromName} hét "DZÔ!" ${Math.round(ev.decibel)} dB!`);
+        break;
+      case 'flip_table':
+        sound.playTableSlam();
+        sceneRef.current?.physicsFlipTable(true);
+        showToast(`💥 ${env.fromName} LẬT BÀN INOX!!`);
+        break;
+      case 'night_end': {
+        if (nightEndingRef.current) break;
+        nightEndingRef.current = true;
+        nightStatsRef.current.billTotal = ev.billTotal;
+        sound.playWhistleAndBowlClink();
+        showToast(
+          `🧾 ${env.fromName} đã tính tiền (${ev.billTotal.toLocaleString('vi-VN')}đ, ${ev.payerName || 'cả bàn'} trả) — TÀN TIỆC! Chuẩn bị chạy xe về...`
+        );
+        window.setTimeout(() => {
+          setSurrenderPhase('idle');
+          handleOpenCommuteModal('return');
+        }, 4000);
+        break;
+      }
+      case 'throw_slipper':
+        sound.playSlap();
+        sceneRef.current?.spawnRemoteSlipper(ev.origin, ev.velocity);
+        showToast(`🩴 ${env.fromName} vừa phi dép tổ ong!`);
+        break;
+    }
+  }
+
+  // ============================================================================
+  // VOICE CHAT (WebRTC mesh + Tone.js drunk voice) & "DZÔ" SHOUT CONTEST
+  // ============================================================================
+  const voiceRef = useRef<VoiceChat | null>(null);
+  const [voiceState, setVoiceState] = useState<VoiceState>({
+    active: false,
+    muted: false,
+    fxAmount: 0,
+    peers: 0,
+    error: null,
+  });
+  const lastLipSyncRef = useRef(0);
+  const [dzoBoard, setDzoBoard] = useState<{ name: string; db: number; at: number; mine: boolean }[]>([]);
+
+  const dzoBoardRef = useRef(dzoBoard);
+  dzoBoardRef.current = dzoBoard;
+  function recordDzoShout(name: string, db: number, mine: boolean) {
+    const now = Date.now();
+    const fresh = dzoBoardRef.current.filter((e) => now - e.at < 60000);
+    const entry = { name, db: Math.round(db), at: now, mine };
+    if (mine) nightStatsRef.current.loudestDzoDb = Math.max(nightStatsRef.current.loudestDzoDb, entry.db);
+    const next = [...fresh, entry].sort((a, b) => b.db - a.db).slice(0, 6);
+    dzoBoardRef.current = next;
+    setDzoBoard(next);
+    if (next[0] === entry && fresh.length > 0) {
+      showToast(`👑 ${name} đang hét "DZÔ" to nhất bàn: ${entry.db} dB!`);
+    }
+  }
+
+  useEffect(() => {
+    const net = tableNet.client;
+    if (!net) return;
+    const voice = new VoiceChat(net);
+    voiceRef.current = voice;
+    voice.onState = setVoiceState;
+    voice.onHiccup = () => sound.playHiccup();
+    voice.onLevel = (level, speaking) => {
+      net.sendVoiceLevel(speaking, level);
+      // Lip-sync from the voice mic unless the "Hô Dzô" mic already drives it
+      if (Math.abs(level - lastLipSyncRef.current) > 0.06) {
+        lastLipSyncRef.current = level;
+        setIkState((prev) => (prev.micVolume === level ? prev : { ...prev, micVolume: level }));
+      }
+    };
+    return () => {
+      voice.stop();
+      voiceRef.current = null;
+    };
+  }, [tableNet.client]);
+
+  useEffect(() => {
+    voiceRef.current?.setDrunkLevel(userPlayer.alcoholLevel);
+  }, [userPlayer.alcoholLevel, voiceState.active]);
+
+  // Spatial voices: pan each friend by where they sit on screen
+  useEffect(() => {
+    if (!voiceState.active || tableNet.remotePlayers.length === 0) return;
+    const timer = window.setInterval(() => {
+      const anchors = sceneRef.current?.getPlayerHeadAnchors() ?? [];
+      const w = window.innerWidth || 1;
+      const h = window.innerHeight || 1;
+      tableNet.remotePlayers.forEach((p) => {
+        const a = anchors.find((x) => x.playerId === remotePlayerId(p.sessionId));
+        if (!a) return;
+        const pan = (a.x / w) * 2 - 1;
+        const near = a.onScreen ? 1 - Math.min(1, Math.abs(a.y / h - 0.5)) : 0.3;
+        voiceRef.current?.setPeerSpatial(p.sessionId, pan * 0.9, near);
+      });
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [voiceState.active, tableNet.remotePlayers]);
+
+  const handleToggleVoice = async () => {
+    const voice = voiceRef.current;
+    if (!voice) {
+      showToast('Chưa kết nối được bàn online — chưa bật voice được.');
+      return;
+    }
+    if (voice.current.active) {
+      voice.stop();
+      showToast('🎙️ Đã tắt voice chat.');
+    } else if (await voice.start()) {
+      showToast('🎙️ Đã bật voice! Say trên 60% là giọng bắt đầu nhè nhè... hic!');
+    }
+  };
+
+  // ============================================================================
+  // KẾT THÚC BUỔI NHẬU: stats for the "Biên Bản Cuối Buổi"
+  // ============================================================================
+  const nightStatsRef = useRef(createNightStats(Date.now(), tableState.players.length));
+  const [nightReport, setNightReport] = useState<NightReport | null>(null);
+  const [nightReportSaved, setNightReportSaved] = useState<boolean | null>(null);
+  const nightEndingRef = useRef(false);
+
+  useEffect(() => {
+    const st = nightStatsRef.current;
+    st.peakAlcohol = Math.max(st.peakAlcohol, userPlayer.alcoholLevel);
+  }, [userPlayer.alcoholLevel]);
+
+  const wasPassedOutRef = useRef(userPlayer.isPassedOut);
+  useEffect(() => {
+    if (userPlayer.isPassedOut && !wasPassedOutRef.current) nightStatsRef.current.timesPassedOut += 1;
+    wasPassedOutRef.current = userPlayer.isPassedOut;
+  }, [userPlayer.isPassedOut]);
+
+  const endNight = (ending: NightEnding) => {
+    const st = nightStatsRef.current;
+    st.drinks = userPlayer.drinksCount;
+    st.tableSize = Math.max(1, scenePlayers.length);
+    if (!st.billTotal) st.billTotal = tableState.totalBill;
+    const cleanName = userPlayer.name.replace(/\s*\(Bạn\)\s*/g, '');
+    const report = buildNightReport(
+      { ...st },
+      ending,
+      scenePlayers.map((p) => ({
+        name: p.isUser ? cleanName : p.name,
+        alcohol: p.alcoholLevel,
+        isUser: p.isUser,
+        isRemote: !!p.isRemote,
+      })),
+      Date.now()
+    );
+    sceneRef.current?.releasePointerLock();
+    setNightReport(report);
+    setNightReportSaved(null);
+    setTableState((prev) => ({
+      ...prev,
+      players: prev.players.map((p) =>
+        p.isUser ? { ...p, coins: p.coins + report.coinsReward, title: report.rankTitle } : p
+      ),
+    }));
+    confetti({ particleCount: 90, spread: 100, origin: { y: 0.4 } });
+
+    const token = localStorage.getItem('tram_nhau_auth_token');
+    fetch(`/api/players/${encodeURIComponent(getNetPlayerId())}/night-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        playerName: cleanName,
+        roomId: tableState.roomId,
+        score: report.score,
+        rankTitle: report.rankTitle,
+        endingKind: report.ending.kind,
+        durationMinutes: report.durationMinutes,
+        drinks: report.stats.drinks,
+        peakAlcohol: report.stats.peakAlcohol,
+        slipperHits: report.stats.slipperHits,
+        loudestDzoDb: report.stats.loudestDzoDb,
+        billShare: report.billShare,
+        timesPassedOut: report.stats.timesPassedOut,
+        coinsReward: report.coinsReward,
+      }),
+    })
+      .then((res) => setNightReportSaved(res.ok))
+      .catch(() => setNightReportSaved(false));
+  };
+
+  /** Tăng 2: same crew, new bill, off to the karaoke room (still drunk!). */
+  const handleAfterParty = () => {
+    setNightReport(null);
+    nightEndingRef.current = false;
+    nightStatsRef.current = createNightStats(Date.now(), scenePlayers.length);
+    nightStatsRef.current.peakAlcohol = userPlayer.alcoholLevel;
+    setSurrenderPhase('idle');
+    setSurrenderResolution(null);
+    setQteResolution(null);
+    setMatchElapsedSeconds(0);
+    setTableState((prev) => ({ ...prev, totalBill: 0, beerTowerLevel: 100 }));
+    setCupState((prev) => ({ ...prev, liquidLevel: 100, warmSeconds: 0 }));
+    sceneRef.current?.physicsResetProps();
+    handleChangePartyStage('karaoke_stage2');
+  };
+
+  // Bill settled here: tell the rest of the online table the night is over
+  useEffect(() => {
+    if (surrenderPhase !== 'summary_diamond_sponsor' || !qteResolution) return;
+    const st = nightStatsRef.current;
+    const me = qteResolution.participants.find((p) => p.isUser);
+    st.billTotal = tableState.totalBill;
+    st.paidWholeBill = !!me?.isDiamondSponsorVictim;
+    st.escapedBill = !!me?.escaped && !me?.isDiamondSponsorVictim;
+    nightEndingRef.current = true;
+    netClientRef.current?.sendEvent({
+      kind: 'night_end',
+      billTotal: tableState.totalBill,
+      payerName: qteResolution.victim.playerName,
+    });
+  }, [surrenderPhase, qteResolution]);
+
+  // Physics props: stream what we own, glide to what others own
+  const netClientRef = useRef(tableNet.client);
+  netClientRef.current = tableNet.client;
+  useEffect(() => {
+    const net = tableNet.client;
+    if (!net) return;
+    return net.onProps.on((env) => sceneRef.current?.applyRemoteProps(env.props));
+  }, [tableNet.client]);
+
+  const handlePhysicsFlipTable = () => {
+    nightStatsRef.current.tablesFlipped += 1;
+    sceneRef.current?.physicsFlipTable();
+    sound.playTableSlam();
+    netClientRef.current?.sendEvent({ kind: 'flip_table' });
+    showToast('💥 RẦM!! Bạn lật tung bàn inox — vỏ lon bay tứ tung!');
+  };
+
+  const handlePhysicsThrowSlipper = () => {
+    const victim = sceneRef.current?.triggerThrowAtFriend();
+    sound.playSlap();
+    showToast(victim ? `🩴 Bạn phi dép tổ ong về phía ${victim}!` : '🩴 Không có ai để ném!');
+  };
+
+  // Synchronize Room State to MongoDB & Redis Cache (presence now comes from the realtime room)
   useEffect(() => {
     fetch('/api/rooms', {
       method: 'POST',
@@ -515,18 +863,6 @@ export default function App({
       }),
     }).catch(() => null);
 
-    const interval = setInterval(() => {
-      fetch(`/api/rooms/${encodeURIComponent(tableState.roomId)}/heartbeat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          playerId: userPlayer.id,
-          playerName: userPlayer.name,
-        }),
-      }).catch(() => null);
-    }, 25000);
-
-    return () => clearInterval(interval);
   }, [tableState.roomId]);
 
   // Initialize 3D Scene once
@@ -535,6 +871,8 @@ export default function App({
 
     const scene = initThreeScene();
     sceneRef.current = scene;
+    // Dev-only handle for poking the 3D scene from the console (drunk FX, physics, net)
+    if (import.meta.env.DEV) (window as unknown as { __beerScene?: SceneController }).__beerScene = scene;
     scene.mount(canvasMountRef.current);
     scene.setGraphicsQuality(graphics);
     scene.updatePlayers(tableState.players);
@@ -549,6 +887,20 @@ export default function App({
     // Callbacks from 3D raycasting & mouse IK pointer
     scene.onPointerAimChange = (aimX: number, aimY: number) => {
       setIkState((prev) => ({ ...prev, aimX, aimY }));
+    };
+
+    // Rapier props → network (the client ref is read lazily: it reconnects over time)
+    scene.onPhysicsSnapshot = (props) => netClientRef.current?.sendProps(props);
+    scene.onLocalSlipperThrown = (origin, velocity) => {
+      nightStatsRef.current.slippersThrown += 1;
+      netClientRef.current?.sendEvent({ kind: 'throw_slipper', origin, velocity });
+    };
+    scene.onSlipperHit = (playerId) => {
+      nightStatsRef.current.slipperHits += 1;
+      sound.playSlap();
+      const name =
+        playersForHitRef.current.find((p) => p.id === playerId)?.name ?? 'bạn nhậu';
+      showToast(`🎯🩴 BỐP! Dép tổ ong trúng đầu ${name}!`);
     };
 
     scene.onBottleClick = () => {
@@ -688,7 +1040,7 @@ export default function App({
   // Sync 3D players, food dishes, WC bulb, Cup Fill Ratio, Rain/Tarp, Karaoke & IK state
   useEffect(() => {
     if (sceneRef.current) {
-      sceneRef.current.updatePlayers(tableState.players);
+      sceneRef.current.updatePlayers(scenePlayers);
       sceneRef.current.updateFoodDishes(tableState.foodDishes);
       sceneRef.current.setUserDrunkLevel(userPlayer.alcoholLevel);
       sceneRef.current.setUserCupFillRatio(cupState.liquidLevel / 100);
@@ -706,7 +1058,7 @@ export default function App({
       );
     }
   }, [
-    tableState.players,
+    scenePlayers,
     tableState.foodDishes,
     tableState.activeMinigame,
     userPlayer.alcoholLevel,
@@ -1919,6 +2271,7 @@ export default function App({
     sound.playCheer();
     sceneRef.current?.setUserCupFillRatio(startingLevel / 100);
     sceneRef.current?.triggerCheers(endLevel / 100);
+    tableNet.client?.sendEvent({ kind: 'cheers' });
     confetti({ particleCount: 55, spread: 75, origin: { y: 0.68 } });
 
     setCupState((prev) => ({
@@ -2399,7 +2752,10 @@ export default function App({
       showToast('Đã tắt nhận diện Mic Hô Dzô & Lip-Sync');
     } else {
       const success = await sound.startMicCheers(
-        (_vol) => {
+        (vol) => {
+          const db = rmsToDecibel(vol);
+          recordDzoShout(userPlayer.name, db, true);
+          netClientRef.current?.sendEvent({ kind: 'dzo_shout', decibel: db });
           setCrowdDecibel(98);
           showToast('🎤 CỘT ÂM LƯỢNG VỌT QUA VẠCH ĐỎ! 1, 2, 3 DZÔÔÔ SLOW-MOTION!');
           handleCheers();
@@ -3719,6 +4075,8 @@ export default function App({
   // ============================================================================
   const handleSendDrunkChat = (rawText: string, processed: ProcessedDrunkChat) => {
     setActiveChatBubble(processed);
+    // Everyone at the table sees the slurred version, not what you meant to type
+    tableNet.client?.sendChat(processed.displayText, userPlayer.alcoholLevel);
     setArenaState((prev) => ({
       ...prev,
       drunkSubtitleBubble: {
@@ -3738,6 +4096,7 @@ export default function App({
 
     if (processed.isShoutSpike) {
       sound.playTableSlam();
+      sceneRef.current?.physicsSlam(1.2);
       setCrowdDecibel(95);
       setTimeout(() => setCrowdDecibel(35), 1500);
       showToast(
@@ -4241,6 +4600,19 @@ export default function App({
 
     setIsCommuteModalOpen(false);
     showToast(result.summaryHeadline);
+
+    // Home (or at the police station): the night is over
+    endNight({
+      kind:
+        result.option === 'grab_vip_return'
+          ? 'grab_home'
+          : result.caughtByPoliceCheckpoint
+          ? 'caught_checkpoint'
+          : 'rode_home_safe',
+      headline: result.summaryHeadline,
+      breathalyzerText: result.breathalyzerReadingText,
+      coinsDelta: result.coinsDelta,
+    });
   };
 
   const handleRedeemImpoundedBikeForTest = () => {
@@ -4739,6 +5111,104 @@ export default function App({
             cheatingAlertText={cheatingAlertText}
             onWakeUp={handleWakeUp}
           />
+
+          {nightReport && (
+            <NightReportModal
+              report={nightReport}
+              playerName={userPlayer.name.replace(/\s*\(Bạn\)\s*/g, '')}
+              saved={nightReportSaved}
+              onAfterParty={handleAfterParty}
+              onExitToMenu={() => {
+                setNightReport(null);
+                sceneRef.current?.releasePointerLock();
+                onExitToMenu?.();
+              }}
+            />
+          )}
+
+          {/* Realtime table (Colyseus): online roster, overhead chat bubbles for remote humans */}
+          {!isCommuteModalOpen && (
+            <TableNetHUD
+              sceneRef={sceneRef}
+              connection={tableNet.connection}
+              roomCode={netRoomCode}
+              remotePlayers={tableNet.remotePlayers}
+              chatFeed={tableNet.chatFeed}
+            >
+              <div className="grid grid-cols-3 gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={handlePhysicsThrowSlipper}
+                  className="rounded-md bg-blue-600/80 hover:bg-blue-500 px-1 py-1 text-[10px] font-black"
+                >
+                  🩴 Ném dép
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePhysicsFlipTable}
+                  className="rounded-md bg-red-600/80 hover:bg-red-500 px-1 py-1 text-[10px] font-black"
+                >
+                  💥 Lật bàn
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sceneRef.current?.physicsResetProps()}
+                  className="rounded-md bg-zinc-700 hover:bg-zinc-600 px-1 py-1 text-[10px] font-black"
+                >
+                  🧹 Dọn bàn
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleTriggerSurrenderBillVote(false)}
+                className="w-full mt-1 rounded-md bg-amber-500 hover:bg-amber-400 text-zinc-950 px-2 py-1 text-[10px] font-black"
+              >
+                🧾 Tính tiền — tàn tiệc
+              </button>
+              <div className="flex gap-1 pt-1">
+                <button
+                  type="button"
+                  onClick={handleToggleVoice}
+                  disabled={tableNet.connection !== 'online'}
+                  className={`flex-1 rounded-md px-2 py-1 text-[10px] font-black disabled:opacity-40 ${
+                    voiceState.active ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-zinc-700 hover:bg-zinc-600'
+                  }`}
+                >
+                  {voiceState.active ? `🎙️ Voice: ${voiceState.peers} người` : '🎙️ Bật voice'}
+                </button>
+                {voiceState.active && (
+                  <button
+                    type="button"
+                    onClick={() => voiceRef.current?.setMuted(!voiceState.muted)}
+                    className="rounded-md bg-zinc-700 hover:bg-zinc-600 px-2 py-1 text-[10px] font-black"
+                  >
+                    {voiceState.muted ? '🔇' : '🔊'}
+                  </button>
+                )}
+              </div>
+              {voiceState.active && voiceState.fxAmount > 0 && (
+                <div className="text-[10px] text-amber-300 font-bold">
+                  🥴 Giọng đang bị bóp say {Math.round(voiceState.fxAmount * 100)}%
+                </div>
+              )}
+              {voiceState.error && <div className="text-[10px] text-red-400">{voiceState.error}</div>}
+              {dzoBoard.length > 0 && (
+                <div className="pt-1 border-t border-zinc-800">
+                  <div className="text-[10px] font-black text-zinc-400 uppercase">📣 Bảng hét DZÔ (60s)</div>
+                  {dzoBoard.slice(0, 3).map((e, i) => (
+                    <div key={`${e.name}_${e.at}`} className="flex text-[10px]">
+                      <span className="flex-1 truncate">
+                        {i === 0 ? '👑 ' : ''}
+                        {e.name}
+                        {e.mine ? ' (bạn)' : ''}
+                      </span>
+                      <span className="font-black text-amber-300">{e.db} dB</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TableNetHUD>
+          )}
 
           {/* Contextual Camera System & Physics IK Hand Controls HUD */}
           <CameraAndControlsHUD

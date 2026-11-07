@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Player } from './types';
 import { BikeSkinId } from './commuteLoopLogic';
+import { BikeSuspension, loadRapier } from './physics';
 
 export type AvatarType = Player['avatar'];
 
@@ -188,7 +189,20 @@ export interface Commute3DController {
     camTargetPos: THREE.Vector3,
     camLookAt: THREE.Vector3
   ) => boolean;
+  dispose: () => void;
 }
+
+/** Ổ gà along the alley: [progress 0..1 of the trip, lane X]. Steer around them! */
+const POTHOLES: [number, number][] = [
+  [0.16, -0.6],
+  [0.29, 0.9],
+  [0.41, 0.1],
+  [0.53, -1.2],
+  [0.64, 0.7],
+  [0.76, -0.2],
+  [0.88, 1.3],
+];
+const BIKE_HALF_WHEELBASE = 0.62;
 
 /**
  * Builds the continuous 3D Alley & Street Commute Corridor along X = 0 from Z = 32 (Player's Tube House)
@@ -890,7 +904,50 @@ export function createCommute3DWorld(): Commute3DController {
   let lastSkin: BikeSkinId = 'dream_chien';
   let lastAvatar: AvatarType = 'dog';
 
+  // ---------------------------------------------------------------------------
+  // RAPIER SUSPENSION: everything on the bike rides a sprung pivot
+  // ---------------------------------------------------------------------------
+  const suspensionPivot = new THREE.Group();
+  suspensionPivot.name = 'BikeSuspensionPivot';
+  [...playerBikeRoot.children].forEach((child) => suspensionPivot.add(child));
+  playerBikeRoot.add(suspensionPivot);
+
+  const potholeMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1 });
+  const potholeRimMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.95 });
+  const potholeMeshes = POTHOLES.map(() => {
+    const g = new THREE.Group();
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.34, 18), potholeMat);
+    hole.rotation.x = -Math.PI / 2;
+    hole.scale.set(1, 0.7, 1);
+    const rim = new THREE.Mesh(new THREE.RingGeometry(0.33, 0.42, 18), potholeRimMat);
+    rim.rotation.x = -Math.PI / 2;
+    rim.scale.set(1, 0.7, 1);
+    rim.position.y = -0.001;
+    g.add(hole, rim);
+    g.position.y = 0.033;
+    root.add(g);
+    return g;
+  });
+
+  let suspension: BikeSuspension | null = null;
+  let suspensionDisposed = false;
+  loadRapier()
+    .then((R) => {
+      if (!suspensionDisposed) suspension = new BikeSuspension(R);
+    })
+    .catch(() => null);
+  let prevFrontZ: number | null = null;
+  let prevRearZ: number | null = null;
+  let prevStage = '';
+  let wasWipedOut = false;
+  let drunkShoveTimer = 0;
+
   return {
+    dispose: () => {
+      suspensionDisposed = true;
+      suspension?.dispose();
+      suspension = null;
+    },
     root,
     update: (time, delta, state, camera, camTargetPos, camLookAt) => {
       root.visible = state.active;
@@ -1045,6 +1102,57 @@ export function createCommute3DWorld(): Commute3DController {
       );
       rivalBikeGroup.rotation.y = baseYaw;
 
+      // Potholes sit on the drive path (mirrored along Z for the ride home)
+      POTHOLES.forEach(([prog, px], i) => {
+        const pz = isReturn
+          ? THREE.MathUtils.lerp(END_Z, START_Z - 5.2, prog)
+          : THREE.MathUtils.lerp(START_Z, END_Z + 0.8, prog);
+        potholeMeshes[i].position.x = px;
+        potholeMeshes[i].position.z = pz;
+      });
+
+      const isDriving =
+        state.stage === 'outbound_fpp_drive' || state.stage === 'return_drunk_fpp_drive';
+      if (suspension) {
+        const fwd = isReturn ? 1 : -1;
+        const frontZ = currentZ + fwd * BIKE_HALF_WHEELBASE;
+        const rearZ = currentZ - fwd * BIKE_HALF_WHEELBASE;
+        if (state.stage !== prevStage) {
+          prevFrontZ = prevRearZ = null;
+          prevStage = state.stage;
+        }
+        if (isDriving && prevFrontZ !== null && prevRearZ !== null) {
+          const speed = state.speedKmh / 3.6;
+          POTHOLES.forEach((_, i) => {
+            const p = potholeMeshes[i].position;
+            if (Math.abs(laneX - p.x) > 0.45) return;
+            const hit = 0.25 + Math.min(1, speed / 14) * 0.85;
+            // Model front is local -Z, which is physics point z = -0.75
+            if ((prevFrontZ! - p.z) * (frontZ - p.z) <= 0 && prevFrontZ !== frontZ) suspension!.bump(-1, hit);
+            if ((prevRearZ! - p.z) * (rearZ - p.z) <= 0 && prevRearZ !== rearZ) suspension!.bump(1, hit * 0.8);
+          });
+          // Riding home drunk: the bike never quite sits still
+          if (state.stage === 'return_drunk_fpp_drive' && state.speedKmh > 3) {
+            drunkShoveTimer -= delta;
+            if (drunkShoveTimer <= 0) {
+              drunkShoveTimer = 0.35 + Math.random() * 0.5;
+              suspension.shove(0.12 + (state.alcoholLevel / 100) * 0.2);
+            }
+          }
+        }
+        if (state.isWipedOut && !wasWipedOut) {
+          suspension.bump(-1, 1.4);
+          suspension.shove(0.8);
+        }
+        wasWipedOut = state.isWipedOut;
+        prevFrontZ = frontZ;
+        prevRearZ = rearZ;
+        suspension.step(delta);
+        suspensionPivot.position.y = suspension.offset.y;
+        suspensionPivot.rotation.x = suspension.offset.pitch;
+        suspensionPivot.rotation.z = suspension.offset.roll;
+      }
+
       // -------------------------------------------------------------------------
       // STAGE-SPECIFIC 3D CHARACTER & CAMERA CHOREOGRAPHY
       // -------------------------------------------------------------------------
@@ -1190,14 +1298,17 @@ export function createCommute3DWorld(): Commute3DController {
         const engineJitter = state.isEngineRunning
           ? Math.sin(time * 48) * 0.004
           : 0;
+        // Helmet rides the suspension: potholes jolt the view, pitch tips the horizon
+        const suspY = suspensionPivot.position.y;
+        const suspPitch = suspensionPivot.rotation.x * forwardDir;
         camTargetPos.set(
           worldBikeX - state.steerInput * 0.06 + drunkSwayX * 0.2,
-          1.29 + engineJitter + drunkSwayY * 0.2,
+          1.29 + engineJitter + drunkSwayY * 0.2 + suspY,
           worldBikeZ - forwardDir * 0.06
         );
         camLookAt.set(
           worldBikeX - state.steerInput * 1.2 * (isReturn ? -1 : 1) + drunkSwayX,
-          0.88 + drunkSwayY,
+          0.88 + drunkSwayY + suspY * 0.6 - suspPitch * 3.2,
           worldBikeZ + forwardDir * 4.2
         );
         const targetFov =

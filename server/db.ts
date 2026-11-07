@@ -106,7 +106,25 @@ export interface IPlayerProfile extends Document {
   timesPassedOut: number;
   bikeImpoundMatchesLeft?: number;
   selectedBikeSkin?: string;
+  nightsCompleted?: number;
+  bestNightScore?: number;
+  nightReports?: NightReportRecord[];
   lastActive: Date;
+}
+
+/** One "Biên Bản Cuối Buổi" kept in the Hộ Chiếu Tửu Lượng (last 20). */
+export interface NightReportRecord {
+  roomId: string;
+  score: number;
+  rankTitle: string;
+  endingKind: string;
+  durationMinutes: number;
+  drinks: number;
+  peakAlcohol: number;
+  slipperHits: number;
+  loudestDzoDb: number;
+  billShare: number;
+  createdAt: Date;
 }
 
 export interface IGameHistory extends Document {
@@ -173,6 +191,9 @@ const PlayerProfileSchema = new Schema<IPlayerProfile>(
     timesPassedOut: { type: Number, default: 0 },
     bikeImpoundMatchesLeft: { type: Number, default: 0 },
     selectedBikeSkin: { type: String, default: 'dream_chien' },
+    nightsCompleted: { type: Number, default: 0 },
+    bestNightScore: { type: Number, default: 0 },
+    nightReports: { type: [Schema.Types.Mixed], default: [] },
     lastActive: { type: Date, default: Date.now },
   },
   { timestamps: true }
@@ -396,6 +417,38 @@ export const dbService = {
       returnDocument: 'after',
       setDefaultsOnInsert: true,
     }).lean();
+  },
+
+  /** Appends a night report and rolls its numbers into the lifetime passport stats. */
+  async addNightReport(
+    playerId: string,
+    name: string,
+    report: NightReportRecord,
+    totals: { drinks: number; timesPassedOut: number; coinsReward: number }
+  ) {
+    requireMongo();
+    // Create the profile with its defaults first: $inc on an upsert would skip the
+    // default 240 Nắp and start the wallet at just the reward.
+    await PlayerProfileModel.updateOne(
+      { playerId },
+      { $setOnInsert: { name: name || 'Bợm Nhậu' } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+    return PlayerProfileModel.findOneAndUpdate(
+      { playerId },
+      {
+        $push: { nightReports: { $each: [report], $slice: -20 } },
+        $inc: {
+          nightsCompleted: 1,
+          drinksCount: totals.drinks,
+          timesPassedOut: totals.timesPassedOut,
+          coins: totals.coinsReward,
+        },
+        $max: { bestNightScore: report.score },
+        $set: { lastActive: new Date() },
+      },
+      { returnDocument: 'after' }
+    ).lean();
   },
 
   async getLeaderboard(limit = 10) {
