@@ -797,11 +797,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             {[10, 24, 41, 58, 73, 88].map((left, i) => (
               <span key={i} className="beer-bubble" style={{ left: `${left}%`, animationDelay: `${i * 0.17}s` }} />
             ))}
-            <span className="relative block font-neon text-lg sm:text-xl text-red-900 leading-tight">
-              🛵 KHỞI HÀNH TỪ NHÀ RA QUÁN!
-            </span>
-            <span className="relative block text-[10px] font-black text-red-900/80 tracking-wider">
-              GIAI ĐOẠN 1 (SPAWN PHASE): Ở NHÀ ➔ RA QUÁN ➔ NHẬU TỚI BẾN
+            <span className="relative block text-center font-neon text-xl sm:text-2xl text-red-900 leading-tight">
+              🍺 VÀO NHẬU!
             </span>
           </button>
 
@@ -870,11 +867,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                 : 'bg-zinc-800/90 border-zinc-600 text-zinc-400'
             }`}
           >
-            {squad.length === 0 ? '🏠➔🛵 Xuất Phát Từ Nhà Ra Quán!' : '🍻 KHỞI HÀNH & NHẬU!'}
+            {squad.length === 0 ? '🍺 Vào Nhậu!' : '🍻 Vào Nhậu!'}
           </button>
           <div className="text-[10px] font-bold text-amber-200 bg-black/75 border border-amber-500/40 rounded-full px-3 py-0.5">
             {squad.length === 0
-              ? 'Giai đoạn 1: Bước ra từ cửa sắt kéo nhà ống trong hẻm (Cách quán 250m)'
+              ? 'Ngồi một mình cũng nhậu được!'
               : `${squad.filter((m) => ready[m.id]).length + (ready.user ? 1 : 0)}/${squad.length + 1} người đã sẵn sàng xuất phát`}
           </div>
         </div>

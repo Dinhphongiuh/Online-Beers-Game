@@ -795,7 +795,7 @@ export const SurrenderBillVoteHUD: React.FC<SurrenderBillVoteHUDProps> = ({
                   onClick={onStartReturnCommute}
                   className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 border-2 border-amber-300 text-white font-black text-sm uppercase tracking-wider cursor-pointer transition shadow-lg"
                 >
-                  🛵 RA BÃI GIỮ XE VỀ NHÀ — ĐƯỜNG VỀ "THẬP TỬ NHẤT SINH" & CHỐT CSGT 20M!
+                  🛵 RA BÃI GIỮ XE VỀ NHÀ!
                 </button>
               )}
               <button

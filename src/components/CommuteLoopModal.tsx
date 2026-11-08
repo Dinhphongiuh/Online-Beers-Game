@@ -513,7 +513,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
       lastEventMessage: isSoberForReturn
         ? '😎 Tỉnh táo 0% cồn leo lên xe 3D — tay lái chắc nịch, cứ thong thả về nhà!'
         : returnAlcohol <= 15
-        ? `🙂 Mới ${returnAlcohol}% cồn: tay lái còn vững nhưng máy đo của CSGT thì không tha đâu!`
+        ? `🙂 Mới ${returnAlcohol}% cồn: tay lái còn khá vững, cứ từ từ mà về!`
         : `🥴 Leo lên xe 3D với ${returnAlcohol}% cồn trong máu! Thị giác phân thân, tay lái trễ 0.5s & tự lạng phải ghì ngược chiều!`,
     };
     setCameraViewMode('fpp');
@@ -643,11 +643,6 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
            =================================================================== */}
         <div className="flex-1 flex flex-col items-center justify-center relative pointer-events-none my-1">
           {/* Drunk Double-Vision HUD Warning Badge (Top-Right Floating) */}
-          {isReturnDrunk && (
-            <div className="absolute top-2 right-2 px-3 py-1.5 rounded-2xl bg-red-950/85 border border-red-400 text-[11px] font-black text-red-200 shadow-lg">
-              🚔 Cẩn thận: Chốt CSGT Áo Vàng phục kích cách cổng nhà đúng 20m!
-            </div>
-          )}
 
           {/* White Exhaust Smoke Puff Floating Callout when cranking E */}
           {bikeState.smokePuffCount > 0 && !bikeState.isEngineRunning && (
@@ -858,7 +853,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
           ) : (
             <div className="pt-1.5 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-amber-300">
-                🚨 Đang phóng 3D về gần tới cổng sắt nhà (Còn {distanceRemainingToDest}m):
+                🏠 Đang phóng 3D về cổng sắt nhà (Còn {distanceRemainingToDest}m):
               </span>
               <button
                 type="button"
@@ -866,7 +861,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                 onClick={handleTriggerCheckpoint20mImmediately}
                 className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 border-2 border-amber-300 text-white font-black text-xs cursor-pointer shadow-lg animate-pulse"
               >
-                🚔 Tới Mốc Cách Nhà 20 Mét ➔ Đụng Chốt CSGT 3D Thổi Nồng Độ Cồn!
+                🏁 Phóng một mạch về nhà!
               </button>
             </div>
           )}
@@ -890,7 +885,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
           </div>
           <div>
             <div className="text-[10px] font-black uppercase tracking-wider text-amber-400">
-              NHẬP VAI 3D TRỰC TIẾP • Ở NHÀ ➔ HẺM PHỐ ĐÊM 3D ➔ RA QUÁN ➔ CHỐT CSGT 20M
+              NHẬP VAI 3D TRỰC TIẾP • HẺM PHỐ ĐÊM 3D
             </div>
             <h2 className="text-xs sm:text-sm font-black text-white">
               LỘ TRÌNH DI CHUYỂN 3D: ĐI TỈNH VỀ QUẮC (3D FPP / TPP COMMUTE)
@@ -899,39 +894,6 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            data-testid="switch-outbound-phase-btn"
-            onClick={() => {
-              setStage('spawn_house_decision');
-              setSpawnDecisionTimer(10);
-            }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-black cursor-pointer border transition ${
-              stage === 'spawn_house_decision' ||
-              stage === 'outbound_fpp_drive' ||
-              stage === 'outbound_grab_vip'
-                ? 'bg-amber-500 text-zinc-950 border-amber-200'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:bg-zinc-800'
-            }`}
-          >
-            🌅 1. Lúc Đi (0% Cồn)
-          </button>
-          <button
-            type="button"
-            data-testid="switch-return-phase-btn"
-            onClick={() => setStage('return_parking_decision')}
-            className={`px-2.5 py-1 rounded-xl text-xs font-black cursor-pointer border transition ${
-              stage === 'return_parking_decision' ||
-              stage === 'return_drunk_fpp_drive' ||
-              stage === 'return_grab_vip' ||
-              stage === 'checkpoint_20m_breathalyzer_qte' ||
-              stage === 'impound_cutscene_summary'
-                ? 'bg-rose-600 text-white border-rose-300'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:bg-zinc-800'
-            }`}
-          >
-            🌙 2. Lúc Về & Chốt CSGT 20m
-          </button>
           <button
             type="button"
             data-testid="close-commute-modal-btn"
@@ -1064,7 +1026,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                   </p>
                 </div>
                 <div className="mt-2 pt-1.5 border-t border-amber-500/30 text-[10px] font-bold text-rose-300">
-                  ⚠️ Rủi ro: Lúc tàn tiệc phải tự cầm lái 3D về với lượng cồn trong máu (Đối mặt Chốt CSGT 20m)!
+                  ⚠️ Rủi ro: Lúc tàn tiệc phải tự cầm lái 3D về với lượng cồn trong máu!
                 </div>
               </button>
 
@@ -1081,7 +1043,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                       TỐN {GRAB_VIP_COST_COINS} NẮP BIA • AN TOÀN TUYỆT ĐỐI 100%
                     </span>
                     <span className="text-xs font-black text-emerald-300">
-                      🛡️ Bảo Hiểm Chốt CSGT
+                      🛡️ Khỏi lo cầm lái
                     </span>
                   </div>
                   <h3 className="text-sm sm:text-base font-black text-white">
@@ -1092,7 +1054,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                   </p>
                 </div>
                 <div className="mt-2 pt-1.5 border-t border-emerald-500/30 text-[10px] font-bold text-emerald-300">
-                  ✅ Đặc quyền Hòa Bình: Lúc về say gục được tài xế 3D cột dây nịt ngang bụng chở thẳng qua chốt!
+                  ✅ Đặc quyền Hòa Bình: Lúc về say gục được tài xế 3D cột dây nịt ngang bụng chở tận nhà!
                 </div>
               </button>
             </div>
@@ -1124,7 +1086,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                   ĐANG ĐỢI XE ÔM CÔNG NGHỆ 3D PHÓNG TỚI CỬA NHÀ... ({grabWaitTimer}s)
                 </div>
                 <p className="text-xs text-zinc-300">
-                  Đã trừ {GRAB_VIP_COST_COINS} Nắp Bia cước khứ hồi trọn gói Bảo Hiểm Chốt Giao Thông!
+                  Đã trừ {GRAB_VIP_COST_COINS} Nắp Bia cước khứ hồi trọn gói!
                 </p>
               </div>
             ) : (
@@ -1242,8 +1204,8 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                 <div>
                   <span className="px-2 py-0.5 rounded bg-red-500 text-white font-black text-[10px]">
                     {isSoberForReturn
-                      ? '✅ 0% CỒN • TỰ LÁI VỀ HỢP PHÁP (CHỐT CSGT VẪN THỔI KIỂM TRA)'
-                      : `⚠️ ${returnAlcohol}% CỒN • CHẮC CHẮN DÍNH CHỐT CSGT CÁCH NHÀ 20M`}
+                      ? '✅ 0% CỒN • TỰ LÁI VỀ NHÀ'
+                      : `⚠️ ${returnAlcohol}% CỒN • TỰ LÁI VỀ NHÀ`}
                   </span>
                   <h4 className="text-sm font-black text-amber-300 mt-1">
                     {isSoberForReturn
@@ -1271,7 +1233,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                     [🧑‍✈️🟢 Về Bằng Xe Ôm Công Nghệ 3D (Cột Dây Nịt Ngang Bụng)]
                   </h4>
                   <p className="text-[11px] text-zinc-200 mt-0.5">
-                    Tài xế áo xanh 3D vác bạn lên yên sau dạng Ragdoll mềm nhũn, <b>cột dây nịt giữ ngang bụng</b> rồi phóng vèo qua chốt về tận giường!
+                    Tài xế áo xanh 3D vác bạn lên yên sau dạng Ragdoll mềm nhũn, <b>cột dây nịt giữ ngang bụng</b> rồi phóng vèo về tận giường!
                   </p>
                 </div>
               </button>
@@ -1293,7 +1255,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                     [🚶 Bỏ Xe Lại Quán & Đi Bộ Lết Về Nhà]
                   </h4>
                   <p className="text-[11px] text-zinc-300 mt-0.5">
-                    Tốn {OVERNIGHT_PARKING_COST_COINS} Nắp Bia phí gửi xe qua đêm tại quán để đi bộ lết qua chốt, bảo toàn 500 Nắp Bia!
+                    Tốn {OVERNIGHT_PARKING_COST_COINS} Nắp Bia phí gửi xe qua đêm tại quán rồi đi bộ lết về nhà!
                   </p>
                 </div>
               </button>
@@ -1314,10 +1276,10 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                     💡 MẸO LÁCH LUẬT #2 • TỐN {GUARD_ASSIST_TIP_COINS} NẮP BIA
                   </span>
                   <h4 className="text-xs sm:text-sm font-black text-purple-300 mt-1">
-                    [🙏 Năn Nỉ Anh Bảo Vệ Quán Dắt Bộ Hộ Qua Chốt]
+                    [🙏 Năn Nỉ Anh Bảo Vệ Quán Dắt Xe Về Hộ]
                   </h4>
                   <p className="text-[11px] text-zinc-300 mt-0.5">
-                    Tắt máy hoàn toàn và nhờ anh bảo vệ quán dắt bộ chiếc {currentBikeSpec.name} qua chốt hộ để thoát án phạt 500 Nắp Bia!
+                    Tắt máy hoàn toàn và nhờ anh bảo vệ quán dắt bộ chiếc {currentBikeSpec.name} về tận nhà hộ!
                   </p>
                 </div>
               </button>
@@ -1342,13 +1304,13 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
           <div className="flex-1" />
           <div className="mx-auto w-full max-w-4xl p-4 rounded-3xl bg-zinc-950/90 border-2 border-emerald-400 space-y-2.5 text-center text-white pointer-events-auto shadow-2xl">
             <span className="px-3 py-1 rounded-full bg-emerald-400 text-zinc-950 font-black text-xs">
-              ĐẶC QUYỀN HÒA BÌNH 3D • BẢO HIỂM 100% QUA CHỐT GIAO THÔNG
+              ĐẶC QUYỀN HÒA BÌNH 3D • VỀ NHÀ AN TOÀN 100%
             </span>
             <h3 className="text-base sm:text-lg font-black text-white">
               TÀI XẾ ÁO XANH 3D CỘT DÂY NỊT GIỮ NGANG BỤNG CHỞ VỀ TẬN GIƯỜNG!
             </h3>
             <p className="text-xs text-zinc-200 max-w-xl mx-auto leading-relaxed">
-              {isSoberForReturn ? 'Dù bạn tỉnh táo 0% cồn' : <>Dù bạn đã say <b>{returnAlcohol}%</b> mềm nhũn như Ragdoll lắc lư trên yên xe 3D</>}, anh Tài Xế Áo Xanh vẫn đợi sẵn ở cửa quán, <b>lấy dây nịt cột chặt bụng bạn với bụng tài xế</b> rồi chở thẳng qua Chốt CSGT về nhà an toàn!
+              {isSoberForReturn ? 'Dù bạn tỉnh táo 0% cồn' : <>Dù bạn đã say <b>{returnAlcohol}%</b> mềm nhũn như Ragdoll lắc lư trên yên xe 3D</>}, anh Tài Xế Áo Xanh vẫn đợi sẵn ở cửa quán, <b>lấy dây nịt cột chặt bụng bạn với bụng tài xế</b> rồi chở thẳng về nhà an toàn!
             </p>
             <button
               type="button"
@@ -1356,7 +1318,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
               onClick={() => handleSelectLoopholeOrGrabReturn('grab_vip_return')}
               className="w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-sm uppercase cursor-pointer shadow-lg"
             >
-              🛏️ VỀ TỚI TẬN GIƯỜNG AN TOÀN 100% (KHÔNG MẤT 500 NẮP BIA!)
+              🛏️ VỀ TỚI TẬN GIƯỜNG AN TOÀN 100%
             </button>
           </div>
         </div>

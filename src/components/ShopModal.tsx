@@ -343,7 +343,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
 
         {/* Footer info */}
         <div className="pt-3 border-t border-zinc-800 text-[11px] text-zinc-400 flex items-center justify-between">
-          <span>✨ Đã uống rượu bia thì đi Xe Ôm Công Nghệ (50 Nắp) kẻo mất 500 Nắp ở chốt!</span>
+          <span>✨ Đã uống rượu bia thì đừng lái xe — gọi Xe Ôm Công Nghệ (50 Nắp)!</span>
           <button
             onClick={onClose}
             className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs cursor-pointer"

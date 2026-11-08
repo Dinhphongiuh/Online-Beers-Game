@@ -545,7 +545,7 @@ export function createCommute3DWorld(): Commute3DController {
   towTruckGroup.add(blueBeacon);
 
   const checkpointBannerTex = createBannerTexture(
-    '🚨 CHỐT ĐO NỒNG ĐỘ CỒN CSGT (CÁCH NHÀ 20M)',
+    '🚨 CHỐT ĐO NỒNG ĐỘ CỒN CSGT',
     'THỔI VÀO ỐNG ĐO • KỊCH KIM > 0.4 MG/L LÀ LÊN XE THÙNG!',
     '#7f1d1d',
     '#fef08a'
@@ -1007,8 +1007,14 @@ export function createCommute3DWorld(): Commute3DController {
         delta
       );
 
-      policeCheckpointGroup.visible = isReturn;
-      if (isReturn) {
+      // The checkpoint is the surprise of the ride home: it only pops out of the
+      // dark once the bike is a few metres from the gate, never earlier.
+      const checkpointRevealed =
+        state.stage === 'checkpoint_20m_breathalyzer_qte' ||
+        state.stage === 'impound_cutscene_summary' ||
+        (state.stage === 'return_drunk_fpp_drive' && currentZ > START_Z - 11);
+      policeCheckpointGroup.visible = checkpointRevealed;
+      if (checkpointRevealed) {
         const flash = Math.sin(time * 16) > 0;
         (redBeacon.material as THREE.MeshBasicMaterial).color.setHex(
           flash ? 0xff0000 : 0x450a0a

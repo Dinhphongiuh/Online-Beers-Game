@@ -39,7 +39,6 @@ interface BottomDockProps {
   onSelectMinigame: (minigame: MinigameId) => void;
   onOpenShop: () => void;
   onTriggerSurrenderBillVote: () => void;
-  onOpenCommuteModal: (phase?: 'outbound' | 'return') => void;
 }
 
 export const BottomDock: React.FC<BottomDockProps> = ({
@@ -63,7 +62,6 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   onSelectMinigame,
   onOpenShop,
   onTriggerSurrenderBillVote,
-  onOpenCommuteModal,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
@@ -263,29 +261,6 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           >
             <ShoppingBag className="w-4 h-4 text-emerald-400" />
             <span className="hidden sm:inline">Tạp Hóa</span>
-          </button>
-
-          {/* [🛵 Đi Tỉnh Về Quắc] (Pre & Post-Match Commute Loop Trigger) */}
-          <button
-            data-testid="open-commute-loop-btn"
-            onClick={() => {
-              setShowGameMenu(false);
-              onOpenCommuteModal('outbound');
-            }}
-            className={`py-2 px-3 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 ${
-              (userPlayer.bikeImpoundMatchesLeft || 0) > 0
-                ? 'bg-red-950/90 border-red-500 text-red-200'
-                : 'bg-sky-500/20 hover:bg-sky-500/35 border-sky-400 text-sky-200'
-            }`}
-            title="Lộ Trình Di Chuyển: Đi Tỉnh Về Quắc (Tự Lái FPP vs Xe Ôm Công Nghệ & Chốt Thổi Nồng Độ Cồn Cách Nhà 20m)"
-          >
-            <span>🛵</span>
-            <span>Đi Tỉnh Về Quắc</span>
-            {(userPlayer.bikeImpoundMatchesLeft || 0) > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-600 text-white font-black">
-                🔒 Giam {userPlayer.bikeImpoundMatchesLeft} trận
-              </span>
-            )}
           </button>
 
           {/* [🧾 GỌI TÍNH TIỀN] ("Em Ơi Tính Tiền!" Surrender Vote Trigger) */}

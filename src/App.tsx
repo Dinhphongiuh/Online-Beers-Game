@@ -5633,7 +5633,6 @@ export default function App({
           onSelectMinigame={handleSelectMinigame}
           onOpenShop={() => setActiveModal('shop')}
           onTriggerSurrenderBillVote={() => handleTriggerSurrenderBillVote(false)}
-          onOpenCommuteModal={(phase = 'outbound') => handleOpenCommuteModal(phase)}
         />
       )}
     </div>
