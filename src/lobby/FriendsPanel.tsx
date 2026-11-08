@@ -132,7 +132,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
             <input
               value={addName}
               onChange={(e) => setAddName(e.target.value)}
-              placeholder="Kết bạn bằng biệt danh hoặc ID…"
+              placeholder="Gõ biệt danh / ID để rủ làm bạn nhậu…"
               data-testid="add-friend-input"
               className="flex-1 min-w-0 bg-zinc-900 text-white text-[11px] px-2 py-1 rounded-lg border border-zinc-800 focus:outline-none focus:border-amber-400"
             />
@@ -140,7 +140,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
               type="submit"
               disabled={sending || !addName.trim()}
               className="px-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 cursor-pointer disabled:opacity-50"
-              aria-label="Gửi lời mời kết bạn"
+              aria-label="Gửi lời rủ làm bạn nhậu"
             >
               <UserPlus className="w-3.5 h-3.5" />
             </button>
@@ -149,7 +149,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
 
           {incoming.length > 0 && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-1.5 space-y-1">
-              <div className="text-[10px] font-black text-amber-300">📨 Lời mời kết bạn</div>
+              <div className="text-[10px] font-black text-amber-300">🍺 Có người muốn cụng ly làm quen!</div>
               {incoming.map((u) => (
                 <div key={u.userId} className="flex items-center gap-1.5">
                   <span className="text-base">{AVATAR_ICON[u.avatar as Player['avatar']] ?? '🍺'}</span>
@@ -158,13 +158,13 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
                     onClick={() => onAcceptFriend(u.userId)}
                     className="px-1.5 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-black cursor-pointer"
                   >
-                    Đồng ý
+                    Zô! 🍻
                   </button>
                   <button
                     onClick={() => onRemoveFriend(u.userId)}
                     className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] font-black cursor-pointer"
                   >
-                    Từ chối
+                    Né 🙈
                   </button>
                 </div>
               ))}
@@ -175,7 +175,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
             {socialError && !social && <div className="text-[10px] text-red-300 px-1">⚠️ {socialError}</div>}
             {social && friends.length === 0 && (
               <div className="text-[10px] text-zinc-500 px-1 py-2 text-center">
-                Chưa có bạn nhậu nào — gõ biệt danh hoặc Mã hộ chiếu ở trên để kết bạn!
+                Nhậu một mình buồn lắm 🥲 — gõ biệt danh hoặc Mã hộ chiếu ở trên để kiếm đồng bọn!
               </div>
             )}
             {friends.map((f) => {
@@ -230,7 +230,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
                 <span className="text-lg leading-none">{AVATAR_ICON[u.avatar as Player['avatar']] ?? '🍺'}</span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-[12px] font-bold text-zinc-300 truncate">{u.username}</span>
-                  <span className="block text-[9px] text-zinc-500">Đang chờ đồng ý kết bạn…</span>
+                  <span className="block text-[9px] text-zinc-500">Đã đưa ly, đang chờ người ta cụng… ⏳</span>
                 </span>
                 <button
                   onClick={() => onRemoveFriend(u.userId)}

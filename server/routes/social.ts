@@ -84,10 +84,10 @@ socialRouter.post('/api/social/friends/request', async (req, res) => {
     if (result === 'sent') socialHub.notify(target.userId, { type: 'friend_request', from: publicProfile(user) });
     if (result === 'accepted') socialHub.notify(target.userId, { type: 'friend_accepted', by: publicProfile(user) });
     const messages = {
-      sent: `📨 Đã gửi lời mời kết bạn tới ${target.username}`,
-      accepted: `🤝 ${target.username} cũng đã mời bạn — giờ là bạn nhậu!`,
-      already_friends: `Hai bạn đã là bạn nhậu rồi 🍻`,
-      already_pending: `Đã gửi lời mời rồi, chờ ${target.username} trả lời nhé`,
+      sent: `🍺 Đã giơ ly mời ${target.username} làm bạn nhậu — chờ người ta cụng lại nhé!`,
+      accepted: `🤝 Tâm đầu ý hợp! ${target.username} cũng đang rủ bạn — chính thức thành đồng bọn nhậu!`,
+      already_friends: `Hai người là bạn nhậu lâu rồi, say quá quên à? 🍻`,
+      already_pending: `Mời rồi mà! Đừng hối, ${target.username} còn đang tìm cái ly 🫗`,
     } as const;
     res.json({ success: true, result, message: messages[result] });
   } catch (error) {
