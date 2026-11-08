@@ -124,10 +124,12 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
 
       {tab === 'friends' ? (
         <div className="space-y-1.5">
-          <div data-testid="social-live" className="flex items-center justify-end gap-1 text-[9px] font-bold text-zinc-500 -mt-1">
-            <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
-            {live ? 'Realtime' : 'Đang kết nối lại…'}
-          </div>
+          {!live && (
+            <div data-testid="social-live" className="flex items-center justify-end gap-1 text-[9px] font-bold text-zinc-500 -mt-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+              Đang kết nối lại…
+            </div>
+          )}
           <form onSubmit={submitAdd} className="flex gap-1">
             <input
               value={addName}
