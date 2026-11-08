@@ -16,6 +16,9 @@ import {
   evaluateSpawnCommuteChoice,
   pressMotorbikeIgnition,
   resolveReturnCommuteOutcome,
+  breathalyzerReadingFor,
+  BREATHALYZER_ZERO_READING_TEXT,
+  SOBER_DRIVER_TITLE,
   stepMotorbikePhysics,
   toggleMotorbikeKickstand,
 } from './commuteLoopLogic.ts';
@@ -227,4 +230,57 @@ test('resolveReturnCommuteOutcome: applies -500 coins, 2-match impound, 999 mg/L
   assert.equal(loophole.coinsDelta, -OVERNIGHT_PARKING_COST_COINS);
   assert.equal(loophole.newCoins, 210);
   assert.equal(loophole.newImpoundMatchesLeft, 1);
+});
+
+test('return trip: the 20m checkpoint stops sober riders too', () => {
+  const state = {
+    ...createInitialMotorbikeState('dream_chien'),
+    isEngineRunning: true,
+    isKickstandDown: false,
+    speedKmh: 40,
+    distanceTraveledMeters: ALLEY_TOTAL_DISTANCE_METERS - POLICE_CHECKPOINT_DISTANCE_FROM_HOME_METERS - 2,
+  };
+  const step = stepMotorbikePhysics(state, {
+    throttle: true,
+    brake: false,
+    steerInput: 0,
+    dtSeconds: 0.5,
+    alcoholLevel: 0,
+    elapsedTimeSeconds: 4,
+    isReturnTrip: true,
+  });
+  assert.equal(step.hitCheckpoint20m, true);
+});
+
+test('resolveReturnCommuteOutcome: 0% alcohol rides home legally, any alcohol is caught', () => {
+  const sober = resolveReturnCommuteOutcome({
+    option: 'drunk_self_drive',
+    currentCoins: 300,
+    currentImpoundMatchesLeft: 1,
+    alcoholLevel: 0,
+    playerName: 'Bợm Nhậu',
+  });
+  assert.equal(sober.caughtByPoliceCheckpoint, false);
+  assert.equal(sober.coinsDelta, 0);
+  assert.equal(sober.newImpoundMatchesLeft, 0);
+  assert.equal(sober.awardedTitle, SOBER_DRIVER_TITLE);
+  assert.equal(sober.breathalyzerReadingText, BREATHALYZER_ZERO_READING_TEXT);
+
+  const tipsy = resolveReturnCommuteOutcome({
+    option: 'drunk_self_drive',
+    currentCoins: 600,
+    currentImpoundMatchesLeft: 0,
+    alcoholLevel: 15,
+    playerName: 'Bợm Nhậu',
+  });
+  assert.equal(tipsy.caughtByPoliceCheckpoint, true);
+  assert.equal(tipsy.breathalyzerReadingText, breathalyzerReadingFor(15));
+  assert.match(tipsy.summaryHeadline, /15% CỒN/);
+});
+
+test('breathalyzerReadingFor scales with the real Độ Cồn', () => {
+  assert.equal(breathalyzerReadingFor(0), BREATHALYZER_ZERO_READING_TEXT);
+  assert.match(breathalyzerReadingFor(15), /^0\.135 mg\/L/);
+  assert.match(breathalyzerReadingFor(50), /^0\.450 mg\/L/);
+  assert.equal(breathalyzerReadingFor(95), BREATHALYZER_MAX_READING_TEXT);
 });

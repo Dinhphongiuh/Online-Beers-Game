@@ -1284,7 +1284,7 @@ export function createCommute3DWorld(): Commute3DController {
       const forwardDir = isReturn ? 1 : -1;
       const drunkFactor =
         state.stage === 'return_drunk_fpp_drive'
-          ? THREE.MathUtils.clamp((state.alcoholLevel - 40) / 60, 0.35, 1)
+          ? THREE.MathUtils.clamp((state.alcoholLevel - 15) / 70, 0, 1)
           : 0;
       const drunkSwayX =
         drunkFactor * (Math.sin(time * 2.4) * 0.32 + Math.cos(time * 3.9) * 0.18);

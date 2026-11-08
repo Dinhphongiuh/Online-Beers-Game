@@ -70,6 +70,19 @@ export const IMPOUNDED_BIKE_TAG_TEMPLATE = (matchesLeft: number) =>
 export const EXEMPLARY_TAXPAYER_TITLE = 'Công Dân Nộp Ngân Sách Tiêu Biểu';
 export const BREATHALYZER_MAX_READING_TEXT =
   'Kịch Khung: 999 mg/L khí thở (Phát hiện máu trong cồn!)';
+export const SOBER_DRIVER_TITLE = 'Tài Xế Tỉnh Táo Gương Mẫu';
+export const BREATHALYZER_ZERO_READING_TEXT = '0.000 mg/L khí thở — Âm tính';
+
+/**
+ * What the CSGT breathalyzer shows for the player's real Độ Cồn. Vietnam has zero
+ * tolerance, so anything above 0 is a violation; ≥90% maxes the meter out.
+ */
+export function breathalyzerReadingFor(alcoholLevel: number): string {
+  if (alcoholLevel < 1) return BREATHALYZER_ZERO_READING_TEXT;
+  if (alcoholLevel >= 90) return BREATHALYZER_MAX_READING_TEXT;
+  const mgPerLiter = (alcoholLevel / 100) * 0.9;
+  return `${mgPerLiter.toFixed(3)} mg/L khí thở — Vượt mức 0 (vi phạm)`;
+}
 
 export interface AlleyObstacle {
   id: string;
@@ -445,14 +458,10 @@ export function stepMotorbikePhysics(
     Math.min(0.95, state.laneX + totalSteer * 0.85 * input.dtSeconds)
   );
 
-  // Check if return trip reaches 20m before home (230m out of 250m) with alcohol > 0
+  // The 20m checkpoint stops EVERY rider on the way home; the breathalyzer decides
   const checkpointTriggerDistance =
     ALLEY_TOTAL_DISTANCE_METERS - POLICE_CHECKPOINT_DISTANCE_FROM_HOME_METERS;
-  if (
-    input.isReturnTrip &&
-    input.alcoholLevel > 0 &&
-    nextDistance >= checkpointTriggerDistance
-  ) {
+  if (input.isReturnTrip && nextDistance >= checkpointTriggerDistance) {
     return {
       nextState: {
         ...state,
@@ -540,7 +549,7 @@ export interface ReturnCommuteResolutionResult {
 export function resolveReturnCommuteOutcome(
   input: ReturnCommuteResolutionInput
 ): ReturnCommuteResolutionResult {
-  const { option, currentCoins, currentImpoundMatchesLeft, playerName } = input;
+  const { option, currentCoins, currentImpoundMatchesLeft, playerName, alcoholLevel } = input;
 
   // 1. Grab VIP Return ("Đặc quyền Hòa Bình")
   if (option === 'grab_vip_return') {
@@ -602,7 +611,26 @@ export function resolveReturnCommuteOutcome(
     };
   }
 
-  // 4. Drunk Self-Drive caught at the 20m Traffic Police Checkpoint! ("The Final Boss")
+  // 4a. Rode home with 0% alcohol: the CSGT waves you through
+  if (alcoholLevel < 1) {
+    const nextImpound = Math.max(0, currentImpoundMatchesLeft - 1);
+    return {
+      option: 'drunk_self_drive',
+      caughtByPoliceCheckpoint: false,
+      coinsDelta: 0,
+      newCoins: currentCoins,
+      newImpoundMatchesLeft: nextImpound,
+      impoundTagText: nextImpound > 0 ? IMPOUNDED_BIKE_TAG_TEMPLATE(nextImpound) : null,
+      awardedTitle: SOBER_DRIVER_TITLE,
+      breathalyzerReadingText: BREATHALYZER_ZERO_READING_TEXT,
+      grabFriendTauntLine: null,
+      summaryHeadline: '✅👮 0.000 mg/L — CSGT GIƠ TAY CHÀO: "MỜI ANH VỀ, CẢM ƠN ANH!"',
+      summaryDetail: `${playerName} không đụng một giọt cồn nên thổi máy đo ra 0.000 mg/L. Anh CSGT gật gù khen ngợi, hạ dây phản quang cho ${playerName} chạy thẳng về cổng sắt nhà!`,
+    };
+  }
+
+  // 4b. Self-drive with alcohol caught at the 20m Traffic Police Checkpoint! ("The Final Boss")
+  const reading = breathalyzerReadingFor(alcoholLevel);
   const newImpound = IMPOUND_DURATION_MATCHES;
   return {
     option: 'drunk_self_drive',
@@ -612,10 +640,12 @@ export function resolveReturnCommuteOutcome(
     newImpoundMatchesLeft: newImpound,
     impoundTagText: IMPOUNDED_BIKE_TAG_TEMPLATE(newImpound),
     awardedTitle: EXEMPLARY_TAXPAYER_TITLE,
-    breathalyzerReadingText: BREATHALYZER_MAX_READING_TEXT,
+    breathalyzerReadingText: reading,
     grabFriendTauntLine: 'Đi bộ vui vẻ nha con trai!',
     summaryHeadline:
-      '🚔💸 KỊCH KHUNG 999 mg/L — LÊN THÙNG XE TẢI CÁCH NHÀ ĐÚNG 20 MÉT!',
-    summaryDetail: `Chỉ còn cách cổng sắt nhà đúng 20m, ${playerName} bị Chốt CSGT căng dây phản quang "Xoẹt!". Máy đo báo "${BREATHALYZER_MAX_READING_TEXT}". Phạt -500 Nắp Bia (đắt gấp 10 lần tiền xe ôm) và giam xe 2 trận!`,
+      alcoholLevel >= 90
+        ? '🚔💸 KỊCH KHUNG 999 mg/L — LÊN THÙNG XE TẢI CÁCH NHÀ ĐÚNG 20 MÉT!'
+        : `🚔💸 DƯƠNG TÍNH ${Math.round(alcoholLevel)}% CỒN — LÊN THÙNG XE TẢI CÁCH NHÀ ĐÚNG 20 MÉT!`,
+    summaryDetail: `Chỉ còn cách cổng sắt nhà đúng 20m, ${playerName} bị Chốt CSGT căng dây phản quang "Xoẹt!". Máy đo báo "${reading}". Luật không chấp nhận dù chỉ 1 giọt: phạt -500 Nắp Bia (đắt gấp 10 lần tiền xe ôm) và giam xe 2 trận!`,
   };
 }

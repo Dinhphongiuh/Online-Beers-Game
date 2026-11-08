@@ -3,7 +3,7 @@ import { Player } from '../game/types';
 import {
   ALLEY_TOTAL_DISTANCE_METERS,
   BIKE_SKINS,
-  BREATHALYZER_MAX_READING_TEXT,
+  breathalyzerReadingFor,
   BikeSkinId,
   CommuteTransportMode,
   DAN_TO_BONUS_POINTS,
@@ -135,8 +135,11 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
     stage === 'return_drunk_fpp_drive' ||
     stage === 'return_parking_decision' ||
     stage === 'checkpoint_20m_breathalyzer_qte'
-      ? Math.max(78, userPlayer.alcoholLevel)
+      ? Math.round(userPlayer.alcoholLevel)
       : 0;
+  // Đi về uses the player's real Độ Cồn (it used to be forced to at least 78%)
+  const returnAlcohol = Math.round(userPlayer.alcoholLevel);
+  const isSoberForReturn = returnAlcohol < 1;
 
   // Sync initial stage when modal opens
   useEffect(() => {
@@ -507,8 +510,11 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
       isKickstandDown: false,
       speedKmh: 28,
       distanceTraveledMeters: 40,
-      lastEventMessage:
-        '🥴 Đã leo lên xe 3D với đầy cồn trong máu! Thị giác phân thân, tay lái trễ 0.5s & tự lạng phải ghì ngược chiều!',
+      lastEventMessage: isSoberForReturn
+        ? '😎 Tỉnh táo 0% cồn leo lên xe 3D — tay lái chắc nịch, cứ thong thả về nhà!'
+        : returnAlcohol <= 15
+        ? `🙂 Mới ${returnAlcohol}% cồn: tay lái còn vững nhưng máy đo của CSGT thì không tha đâu!`
+        : `🥴 Leo lên xe 3D với ${returnAlcohol}% cồn trong máu! Thị giác phân thân, tay lái trễ 0.5s & tự lạng phải ghì ngược chiều!`,
     };
     setCameraViewMode('fpp');
     setBikeState(readyBike);
@@ -1214,7 +1220,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
-                  🌙 TÀN TIỆC RA BÃI GIỮ XE 3D • ĐỘ CỒN TRONG MÁU: {effectiveDrunkAlcohol}%
+                  🌙 TÀN TIỆC RA BÃI GIỮ XE 3D • ĐỘ CỒN TRONG MÁU: {returnAlcohol}%
                 </span>
                 <h3 className="text-sm sm:text-base font-black text-white mt-1">
                   ĐƯỜNG VỀ "THẬP TỬ NHẤT SINH": LỰA CHỌN TẠI BÃI GIỮ XE QUÁN!
@@ -1235,10 +1241,14 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
               >
                 <div>
                   <span className="px-2 py-0.5 rounded bg-red-500 text-white font-black text-[10px]">
-                    ⚠️ RỦI RO 99% ĐỤNG CHỐT CSGT 3D CÁCH NHÀ 20M
+                    {isSoberForReturn
+                      ? '✅ 0% CỒN • TỰ LÁI VỀ HỢP PHÁP (CHỐT CSGT VẪN THỔI KIỂM TRA)'
+                      : `⚠️ ${returnAlcohol}% CỒN • CHẮC CHẮN DÍNH CHỐT CSGT CÁCH NHÀ 20M`}
                   </span>
                   <h4 className="text-sm font-black text-amber-300 mt-1">
-                    [🛵 Tự Cầm Lái Chiến Cơ 3D Về Nhà Khi Đang Say]
+                    {isSoberForReturn
+                      ? '[🛵 Tự Cầm Lái Chiến Cơ 3D Về Nhà (Tỉnh Táo)]'
+                      : '[🛵 Tự Cầm Lái Chiến Cơ 3D Về Nhà Khi Đang Say]'}
                   </h4>
                   <p className="text-[11px] text-zinc-200 mt-0.5">
                     Lái xe 3D góc nhìn thứ nhất khi say: camera nghiêng ngả, <b>trễ thao tác 0.5 giây</b>, ghi-đông 3D tự lạng phải ghì ngược chiều (Counter-steer)!
@@ -1338,7 +1348,7 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
               TÀI XẾ ÁO XANH 3D CỘT DÂY NỊT GIỮ NGANG BỤNG CHỞ VỀ TẬN GIƯỜNG!
             </h3>
             <p className="text-xs text-zinc-200 max-w-xl mx-auto leading-relaxed">
-              Dù bạn đã say <b>{effectiveDrunkAlcohol}%</b> mềm nhũn như Ragdoll lắc lư trên yên xe 3D, anh Tài Xế Áo Xanh vẫn đợi sẵn ở cửa quán, <b>lấy dây nịt cột chặt bụng bạn với bụng tài xế</b> rồi chở thẳng qua Chốt CSGT về nhà an toàn!
+              {isSoberForReturn ? 'Dù bạn tỉnh táo 0% cồn' : <>Dù bạn đã say <b>{returnAlcohol}%</b> mềm nhũn như Ragdoll lắc lư trên yên xe 3D</>}, anh Tài Xế Áo Xanh vẫn đợi sẵn ở cửa quán, <b>lấy dây nịt cột chặt bụng bạn với bụng tài xế</b> rồi chở thẳng qua Chốt CSGT về nhà an toàn!
             </p>
             <button
               type="button"
@@ -1389,16 +1399,18 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                 <div
                   data-testid="breathalyzer-led-screen"
                   className={`p-2.5 rounded-xl font-mono font-black text-xs border-2 ${
-                    isBlowingCompleted
+                    isBlowingCompleted && !isSoberForReturn
                       ? 'bg-red-950 border-red-500 text-red-300 animate-pulse'
                       : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
                   }`}
                 >
                   {isBlowingCompleted ? (
                     <>
-                      <div>🚨 TÍT TÍT TÍT — BÁO ĐỘNG ĐỎ!</div>
+                      <div>
+                        {isSoberForReturn ? '✅ TÍT — ÂM TÍNH, MỜI ĐI!' : '🚨 TÍT TÍT TÍT — BÁO ĐỘNG ĐỎ!'}
+                      </div>
                       <div className="text-amber-300 mt-0.5">
-                        {BREATHALYZER_MAX_READING_TEXT}
+                        {breathalyzerReadingFor(returnAlcohol)}
                       </div>
                     </>
                   ) : (
@@ -1425,9 +1437,13 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                     type="button"
                     data-testid="proceed-to-impound-cutscene-btn"
                     onClick={() => setStage('impound_cutscene_summary')}
-                    className="w-full py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-500 border-2 border-amber-300 text-white font-black text-xs sm:text-sm uppercase tracking-wider cursor-pointer shadow-xl animate-pulse"
+                    className={`w-full py-3 px-4 rounded-2xl border-2 border-amber-300 text-white font-black text-xs sm:text-sm uppercase tracking-wider cursor-pointer shadow-xl ${
+                      isSoberForReturn ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500 animate-pulse'
+                    }`}
                   >
-                    🚛 XEM CUTSCENE 3D XE LÊN THÙNG & KÝ BIÊN BẢN TẠM GIỮ!
+                    {isSoberForReturn
+                      ? '🏠 CSGT CHÀO TẠM BIỆT — CHẠY NỐT 20M VỀ NHÀ!'
+                      : '🚛 XEM CUTSCENE 3D XE LÊN THÙNG & KÝ BIÊN BẢN TẠM GIỮ!'}
                   </button>
                 )}
               </div>
@@ -1499,7 +1515,9 @@ export const CommuteLoopModal: React.FC<CommuteLoopModalProps> = ({
                       <Camera className="w-3.5 h-3.5 text-red-600" />
                       <span>ẢNH KỶ NIỆM CHỐT GIAO THÔNG</span>
                     </span>
-                    <span>REC • 999 mg/L</span>
+                    <span>
+                      REC • {returnResolution?.breathalyzerReadingText?.split(' khí thở')[0] ?? `${returnAlcohol}% cồn`}
+                    </span>
                   </div>
                   <div className="py-2 px-3 rounded-xl bg-zinc-900 text-white text-center">
                     <div className="text-2xl">
