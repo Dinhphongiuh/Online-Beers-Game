@@ -12,6 +12,7 @@ import {
   createInitialBottleCapVotes,
   resolveBillEscapeQTE,
   resolveSurrenderVote,
+  resolvePassOutSurrender,
 } from './surrenderVoteLogic';
 import { Player } from './types';
 
@@ -269,4 +270,17 @@ describe('Em Ơi Tính Tiền! (Surrender Vote Logic)', () => {
     assert.equal(qteSlowUser.victim.playerId, 'user');
     assert.equal(qteSlowUser.victim.isDiamondSponsorVictim, true);
   });
+});
+
+it('passing out is surrendering: the sleeper pays, the awake escape, other sleepers stay put', () => {
+  const players = [
+    { ...MOCK_PLAYERS[0], id: 'user', isUser: true, isPassedOut: true, alcoholLevel: 100 },
+    { ...MOCK_PLAYERS[1], id: 'b1', isPassedOut: false, alcoholLevel: 50 },
+    { ...MOCK_PLAYERS[2], id: 'b2', isPassedOut: true, alcoholLevel: 100 },
+  ];
+  const r = resolvePassOutSurrender(players, 'user');
+  assert.equal(r.victim.playerId, 'user');
+  assert.equal(r.participants.find((p) => p.playerId === 'b1')?.escaped, true);
+  assert.equal(r.participants.find((p) => p.playerId === 'b2')?.escaped, false);
+  assert.equal(r.participants.filter((p) => p.isDiamondSponsorVictim).length, 1);
 });

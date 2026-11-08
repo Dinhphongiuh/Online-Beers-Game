@@ -120,7 +120,15 @@ export default function Root() {
           isLoggedIn={!!userSession}
           onAuthSuccess={handleAuthSuccess}
           onLogout={handleLogout}
-          onExitToMenu={() => setPhase('menu')}
+          onExitToMenu={() => {
+            // Drop the `?autostart=1` dev shortcut: a later reload (F5 / Vite) must stay on the menu
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('autostart')) {
+              url.searchParams.delete('autostart');
+              window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+            }
+            setPhase('menu');
+          }}
         />
       ) : (
         <MainMenu

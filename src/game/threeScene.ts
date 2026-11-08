@@ -133,6 +133,11 @@ export interface SceneController {
   setRemotePoses: (poses: Record<string, RemotePose>) => void;
   /** Screen-space head anchors (px, relative to the mount div) for overhead HTML bubbles. */
   getPlayerHeadAnchors: () => PlayerHeadAnchor[];
+  /**
+   * Polaroid for the Sổ Nợ: grabs the next rendered frame as a small JPEG data URL
+   * (read right after the draw, so no preserveDrawingBuffer is needed).
+   */
+  captureSnapshot: (maxWidth?: number) => Promise<string | null>;
 }
 
 export interface RemotePose {
@@ -218,6 +223,27 @@ export function initThreeScene(): SceneController {
   let camera: THREE.PerspectiveCamera | null = null;
   let clock: THREE.Clock | null = null;
   let frameId = 0;
+  const snapshotRequests: { maxWidth: number; resolve: (url: string | null) => void }[] = [];
+  const flushSnapshotRequests = () => {
+    const pending = snapshotRequests.splice(0);
+    const src = renderer?.domElement;
+    for (const req of pending) {
+      try {
+        if (!src || !src.width) {
+          req.resolve(null);
+          continue;
+        }
+        const scale = Math.min(1, req.maxWidth / src.width);
+        const c = document.createElement('canvas');
+        c.width = Math.round(src.width * scale);
+        c.height = Math.round(src.height * scale);
+        c.getContext('2d')?.drawImage(src, 0, 0, c.width, c.height);
+        req.resolve(c.toDataURL('image/jpeg', 0.72));
+      } catch {
+        req.resolve(null);
+      }
+    }
+  };
   let isSoftwareGl = false;
 
   // Scene props
@@ -2186,6 +2212,7 @@ export function initThreeScene(): SceneController {
       composer.render(rawDelta);
     }
     else renderer.render(scene, camera);
+    if (snapshotRequests.length) flushSnapshotRequests();
 
     if (isSoftwareGl) {
       afterDraw(tick);
@@ -2464,6 +2491,23 @@ export function initThreeScene(): SceneController {
     releasePointerLock: () => {
       if (pointerLocked) document.exitPointerLock();
     },
+
+    captureSnapshot: (maxWidth = 360) =>
+      new Promise<string | null>((resolve) => {
+        if (!renderer) return resolve(null);
+        snapshotRequests.push({ maxWidth, resolve });
+        // The render loop is paused (background tab / hidden pane): draw one frame ourselves
+        setTimeout(() => {
+          if (!snapshotRequests.some((r) => r.resolve === resolve)) return;
+          try {
+            if (composer) composer.render(0);
+            else if (renderer && scene && camera) renderer.render(scene, camera);
+          } catch {
+            // fall through: flush resolves null on an unreadable canvas
+          }
+          flushSnapshotRequests();
+        }, 300);
+      }),
 
     getCameraYaw: () => camYaw,
 

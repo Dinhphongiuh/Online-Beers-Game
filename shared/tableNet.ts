@@ -44,6 +44,8 @@ export interface NetPlayer {
   /** Mic loudness 0..1, drives the remote mouth/bubble and the "DZÔ" meter. */
   voiceLevel: number;
   joinedAt: number;
+  /** Sổ Nợ: "NỢ 1 CHẦU NHẬU TỪ 08/11" while their creditor sits at this table (else ''). */
+  debt: string;
 }
 
 export interface PoseMessage {
@@ -58,6 +60,7 @@ export interface StatusMessage {
   alcohol: number;
   passedOut: boolean;
   drinks: number;
+  debt?: string;
 }
 
 export interface VoiceLevelMessage {
@@ -169,6 +172,7 @@ export function sanitizeStatus(m: unknown): StatusMessage | null {
     alcohol: clampNum(o.alcohol, 0, 100),
     passedOut: o.passedOut === true,
     drinks: Math.round(clampNum(o.drinks, 0, 9999)),
+    debt: typeof o.debt === 'string' ? o.debt.slice(0, 60) : '',
   };
 }
 

@@ -17,6 +17,9 @@ import {
   AVATAR_ICON,
   drinkingRank,
 } from './lobbyData';
+import { HangoverBook } from '../components/HangoverBook';
+import { getNetPlayerId } from '../net/useTableNet';
+import type { MatchReceipt } from '../../shared/receipts';
 
 // Browsers keep audio locked until the first gesture; don't spam a suspended context on hover.
 let audioUnlocked = false;
@@ -373,8 +376,27 @@ export const ProfilePanel: React.FC<{
   toastCount: number;
   onClose: () => void;
 }> = ({ name, avatar, coins, toastCount, onClose }) => {
-  const [tab, setTab] = useState<'passport' | 'rank' | 'history'>('passport');
+  const [tab, setTab] = useState<'passport' | 'rank'>('passport');
+  const [bookOpen, setBookOpen] = useState(false);
+  const [passport, setPassport] = useState<{ escaped: number; nights: number; pinned: MatchReceipt | null } | null>(null);
   const rank = drinkingRank(toastCount);
+
+  // Real numbers + the photo pinned to the front page (from the Sổ Nợ)
+  useEffect(() => {
+    if (bookOpen) return;
+    const token = localStorage.getItem('tram_nhau_auth_token');
+    fetch(`/api/players/${encodeURIComponent(getNetPlayerId())}/receipts`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        const pinned =
+          (d.receipts as MatchReceipt[]).find((r) => r.receiptCode === d.pinnedReceiptCode && r.funnySnapshot) ?? null;
+        setPassport({ escaped: d.lifetime.nightsEscaped, nights: d.lifetime.nights, pinned });
+      })
+      .catch(() => null);
+  }, [bookOpen]);
   const leaderboard = [
     { name: 'Phi Quân', icon: '🐼', score: 312, title: 'Thần Cồn' },
     { name: 'Khoa Nguyễn', icon: '🐻', score: 287, title: 'Trùm Vỉa Hè' },
@@ -395,14 +417,15 @@ export const ProfilePanel: React.FC<{
           {[
             { id: 'passport' as const, label: '🪪 Hộ Chiếu' },
             { id: 'rank' as const, label: '🏆 BXH Thần Cồn' },
-            { id: 'history' as const, label: '🧾 Lịch Sử & Clip' },
+            { id: 'history' as const, label: '📕 Lịch Sử Nhậu' },
           ].map((t) => (
             <button
               key={t.id}
               {...sfx}
-              onClick={() => setTab(t.id)}
+              data-testid={`profile-tab-${t.id}`}
+              onClick={() => (t.id === 'history' ? setBookOpen(true) : setTab(t.id))}
               className={`flex-1 py-1.5 rounded-lg text-[11px] font-black cursor-pointer ${
-                tab === t.id ? 'bg-amber-400 text-emerald-950' : 'bg-black/25 text-white/80 hover:bg-black/40'
+                t.id !== 'history' && tab === t.id ? 'bg-amber-400 text-emerald-950' : 'bg-black/25 text-white/80 hover:bg-black/40'
               }`}
             >
               {t.label}
@@ -413,15 +436,24 @@ export const ProfilePanel: React.FC<{
         <div className="p-4 pt-2">
           {tab === 'passport' && (
             <div className="flex gap-4 items-start">
-              <div className="w-24 h-28 shrink-0 rounded-lg bg-amber-100 border-2 border-amber-600 flex items-center justify-center text-6xl">
-                {AVATAR_ICON[avatar]}
-              </div>
+              {passport?.pinned ? (
+                <div className="w-28 shrink-0 bg-white p-1.5 pb-6 shadow-lg rotate-[-4deg] relative" title="Ảnh ghim trang nhất">
+                  <img src={passport.pinned.funnySnapshot} alt="" className="w-full aspect-[4/3] object-cover sepia-[25%]" />
+                  <div className="absolute bottom-1 left-1.5 right-1.5 text-[8px] leading-tight text-zinc-700 line-clamp-2">
+                    {passport.pinned.funnySnapshotCaption}
+                  </div>
+                </div>
+              ) : (
+                <div className="w-24 h-28 shrink-0 rounded-lg bg-amber-100 border-2 border-amber-600 flex items-center justify-center text-6xl">
+                  {AVATAR_ICON[avatar]}
+                </div>
+              )}
               <div className="text-sm space-y-1.5">
                 <div><span className="text-white/50 text-[11px]">Họ tên:</span> <b>{name}</b></div>
                 <div><span className="text-white/50 text-[11px]">Cấp tửu lượng:</span> <b className="text-amber-300">Lv.{rank.level} {rank.name}</b></div>
                 <div><span className="text-white/50 text-[11px]">Số lần hô Dzô:</span> <b>{toastCount}</b></div>
                 <div><span className="text-white/50 text-[11px]">Nắp bia tích lũy:</span> <b>{coins} 🪙</b></div>
-                <div><span className="text-white/50 text-[11px]">Lần trốn bill thành công:</span> <b>3</b></div>
+                <div><span className="text-white/50 text-[11px]">Lần trốn bill thành công:</span> <b>{passport ? `${passport.escaped}/${passport.nights} buổi` : '—'}</b></div>
                 <div className="inline-block mt-1 px-2 py-0.5 rounded border-2 border-red-500 text-red-400 text-[10px] font-black rotate-[-4deg]">
                   ĐÃ ĐÓNG DẤU KIỂM ĐỊNH ĐỘ LẦY
                 </div>
@@ -450,31 +482,9 @@ export const ProfilePanel: React.FC<{
             </ol>
           )}
 
-          {tab === 'history' && (
-            <div className="space-y-3">
-              <div>
-                <div className="text-xs font-black text-amber-300 mb-1.5">🏃 Lịch Sử Trốn Bill</div>
-                <ul className="text-[12px] space-y-1 text-white/85">
-                  <li>• Giả vờ đi WC rồi leo rào — <b className="text-emerald-300">Thành công</b> (468.000đ)</li>
-                  <li>• Giả vờ nghe điện thoại vợ — <b className="text-red-300">Bị Phi Quân tóm cổ</b></li>
-                  <li>• Gục bàn giả xỉn — <b className="text-emerald-300">Thành công</b> (312.000đ)</li>
-                </ul>
-              </div>
-              <div>
-                <div className="text-xs font-black text-amber-300 mb-1.5">🎬 Clip Highlight Đã Lưu</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {['Khoa leo cây lúc 2h sáng', 'Phi Quân gọi Mai Anh', 'Cụng ly vỡ tháp bia', 'Nga Phan càn quét mồi'].map((c) => (
-                    <div key={c} className="rounded-lg bg-black/40 border border-white/10 p-2">
-                      <div className="h-12 rounded bg-gradient-to-br from-amber-500/40 to-red-700/40 flex items-center justify-center text-lg">▶</div>
-                      <div className="text-[10px] mt-1 font-bold leading-tight">{c}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
+      {bookOpen && <HangoverBook name={name} avatar={avatar} onClose={() => setBookOpen(false)} />}
     </ModalBackdrop>
   );
 };

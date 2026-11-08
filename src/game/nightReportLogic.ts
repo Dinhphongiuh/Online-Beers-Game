@@ -8,7 +8,8 @@ export type NightEndingKind =
   | 'rode_home_safe' // tự chạy xe về, qua chốt an toàn
   | 'caught_checkpoint' // dính chốt CSGT, bị giam xe
   | 'grab_home' // gọi Grab về
-  | 'left_table'; // rời bàn không qua màn chạy về
+  | 'left_table' // rời bàn không qua màn chạy về
+  | 'passed_out'; // ngất = đầu hàng: lãnh bill, bị khiêng về
 
 export interface NightStats {
   startedAt: number;
@@ -107,6 +108,9 @@ export function scoreNight(stats: NightStats, ending: NightEnding): number {
       break;
     case 'left_table':
       break;
+    case 'passed_out':
+      score -= 30; // ngất = đầu hàng
+      break;
   }
   return Math.max(0, Math.round(score));
 }
@@ -136,6 +140,7 @@ export function buildNightReport(
   if (stats.paidWholeBill) highlights.push('💎 Một mình gánh cả hóa đơn — Nhà Tài Trợ Kim Cương');
   if (stats.escapedBill) highlights.push('🏃 Trốn bill thành công, không mất đồng nào');
   if (ending.kind === 'caught_checkpoint') highlights.push('🚨 Dính chốt CSGT, xe vào đồn ngủ');
+  if (ending.kind === 'passed_out') highlights.push('💤 Ngất = Đầu hàng: lãnh bill rồi bị anh em khiêng về');
   if (ending.kind === 'grab_home') highlights.push('🚕 Uống rồi không lái — gọi Grab về an toàn');
   if (!highlights.length) highlights.push('🥤 Một buổi nhậu nhẹ nhàng, tỉnh táo ra về');
 

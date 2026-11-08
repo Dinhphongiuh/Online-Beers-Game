@@ -31,6 +31,19 @@ import {
   type NightReport,
 } from './game/nightReportLogic';
 import { getNetPlayerId } from './net/useTableNet';
+import {
+  DEBT_GLASS_MULTIPLIER,
+  SHAME_CAPTIONS,
+  awardTablemates,
+  botGrudgeId,
+  countQuote,
+  isMoreShameful,
+  pushAlcoholSample,
+  topQuotes,
+  type ShameMoment,
+} from './game/receiptLogic';
+import type { AlcoholSample, CommuteChoice, MatchReceiptInput } from '../shared/receipts';
+import { WantedSignsHUD } from './components/WantedSignsHUD';
 import { CameraAndControlsHUD } from './components/CameraAndControlsHUD';
 import { CrocodileGame } from './components/CrocodileGame';
 import { SpinBottleGame } from './components/SpinBottleGame';
@@ -95,6 +108,8 @@ import {
   pickSurrenderAutoChat,
   resolveBillEscapeQTE,
   resolveSurrenderVote,
+  resolvePassOutSurrender,
+  PASS_OUT_SURRENDER_DELAY_MS,
 } from './game/surrenderVoteLogic';
 import confetti from 'canvas-confetti';
 import { DRUNK_SPEEDS, LobbyConfig, THEME_NAMES } from './lobby/lobbyData';
@@ -584,6 +599,7 @@ export default function App({
       alcohol: userPlayer.alcoholLevel,
       passedOut: userPlayer.isPassedOut,
       drinks: userPlayer.drinksCount,
+      debt: myDebtLabelRef.current,
     });
   }, [
     tableNet.client,
@@ -729,6 +745,179 @@ export default function App({
   const [nightReportSaved, setNightReportSaved] = useState<boolean | null>(null);
   const nightEndingRef = useRef(false);
 
+  // ============================================================================
+  // SỔ NỢ GIA TRUYỀN: what goes on tonight's Tờ Hóa Đơn Ký Ức
+  // ============================================================================
+  const newReceiptTrack = () => ({
+    timeline: [] as AlcoholSample[],
+    quotes: {} as Record<string, number>,
+    toiletRuns: 0,
+    pukes: 0,
+    spills: 0,
+    cansThrown: 0,
+    billCalls: 0,
+    billRejected: 0,
+    commuteChoice: 'NONE' as CommuteChoice,
+    finePaid: 0,
+    shame: null as { moment: ShameMoment; url: string } | null,
+    shot: null as Promise<void> | null,
+    billOutcome: null as BillEscapeResolution | null,
+  });
+  const receiptTrackRef = useRef(newReceiptTrack());
+  const latestAlcoholRef = useRef(userPlayer.alcoholLevel);
+  latestAlcoholRef.current = userPlayer.alcoholLevel;
+
+  const nightSeconds = () => (Date.now() - nightStatsRef.current.startedAt) / 1000;
+
+  /** Drop a labelled point on tonight's alcohol ECG. */
+  const markNight = (note: string, alcohol = latestAlcoholRef.current) => {
+    const tr = receiptTrackRef.current;
+    tr.timeline = pushAlcoholSample(tr.timeline, nightSeconds(), alcohol, note);
+  };
+
+  /** Polaroid of the most embarrassing moment so far (replaces a milder one). */
+  const captureShame = (moment: ShameMoment) => {
+    const tr = receiptTrackRef.current;
+    if (!isMoreShameful(moment, tr.shame?.moment ?? null)) return;
+    const shot = sceneRef.current?.captureSnapshot(360);
+    if (!shot) return;
+    tr.shot = shot.then((url) => {
+      if (url && isMoreShameful(moment, receiptTrackRef.current.shame?.moment ?? null)) {
+        receiptTrackRef.current.shame = { moment, url };
+      }
+    });
+  };
+
+  useEffect(() => {
+    const tr = receiptTrackRef.current;
+    tr.timeline = pushAlcoholSample(tr.timeline, nightSeconds(), userPlayer.alcoholLevel);
+  }, [userPlayer.alcoholLevel]);
+
+  // ---- Ghim thù: wanted signs + the debtor's 1.5x first glass ----
+  interface GrudgeView {
+    receiptCode: string;
+    creditorNetId: string;
+    creditorName: string;
+    targetId: string;
+    targetName: string;
+    since: number;
+  }
+  const [grudgesHeld, setGrudgesHeld] = useState<GrudgeView[]>([]);
+  const [debtsOwed, setDebtsOwed] = useState<GrudgeView[]>([]);
+  useEffect(() => {
+    const token = localStorage.getItem('tram_nhau_auth_token');
+    fetch(`/api/players/${encodeURIComponent(getNetPlayerId())}/grudges`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setGrudgesHeld(data.held ?? []);
+        setDebtsOwed(data.owed ?? []);
+      })
+      .catch(() => null);
+  }, []);
+
+  const debtLabel = (since: number) => {
+    const d = new Date(since);
+    return `⚠️ NỢ 1 CHẦU NHẬU TỪ NGÀY ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  /** My debt to a creditor who is sitting at this table right now. */
+  const myActiveDebt = useMemo(
+    () =>
+      debtsOwed.find((d) => tableNet.remotePlayers.some((p) => p.playerId === d.creditorNetId)) ?? null,
+    [debtsOwed, tableNet.remotePlayers]
+  );
+
+  /** Scene player id → wanted poster text. */
+  const wantedSigns = useMemo(() => {
+    const signs: { playerId: string; text: string; creditor: string }[] = [];
+    for (const g of grudgesHeld) {
+      const bot = tableState.players.find((p) => !p.isUser && botGrudgeId(p.name) === g.targetId);
+      const remote = tableNet.remotePlayers.find((p) => p.playerId === g.targetId);
+      const id = bot?.id ?? (remote ? remotePlayerId(remote.sessionId) : null);
+      if (id) signs.push({ playerId: id, text: debtLabel(g.since), creditor: 'bạn' });
+    }
+    // Somebody else's grudge: the debtor's own client announces it
+    for (const p of tableNet.remotePlayers) {
+      const id = remotePlayerId(p.sessionId);
+      if (p.debt && !signs.some((s) => s.playerId === id)) signs.push({ playerId: id, text: p.debt, creditor: '' });
+    }
+    return signs;
+  }, [grudgesHeld, tableState.players, tableNet.remotePlayers]);
+
+  const settleGrudge = (receiptCode: string) => {
+    const token = localStorage.getItem('tram_nhau_auth_token');
+    fetch(`/api/receipts/${encodeURIComponent(receiptCode)}/grudge/settle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ playerId: getNetPlayerId() }),
+    }).catch(() => null);
+  };
+
+  // Debtors (me, or NPC regulars I pinned) pay with a glass 1.5x the size
+  const debtWatchRef = useRef<Record<string, { drinks: number; alcohol: number }>>({});
+  useEffect(() => {
+    const debtors: { id: string; receiptCode: string; creditor: string }[] = [];
+    if (myActiveDebt) debtors.push({ id: userPlayer.id, receiptCode: myActiveDebt.receiptCode, creditor: myActiveDebt.creditorName });
+    for (const g of grudgesHeld) {
+      const bot = tableState.players.find((p) => !p.isUser && botGrudgeId(p.name) === g.targetId);
+      if (bot) debtors.push({ id: bot.id, receiptCode: g.receiptCode, creditor: 'bạn' });
+    }
+    for (const d of debtors) {
+      const p = tableState.players.find((x) => x.id === d.id);
+      if (!p) continue;
+      const base = debtWatchRef.current[d.receiptCode];
+      if (!base) {
+        debtWatchRef.current[d.receiptCode] = { drinks: p.drinksCount, alcohol: p.alcoholLevel };
+        continue;
+      }
+      if (p.drinksCount <= base.drinks) {
+        base.alcohol = p.alcoholLevel;
+        continue;
+      }
+      const gained = Math.max(4, p.alcoholLevel - base.alcohol);
+      const extra = Math.round(gained * (DEBT_GLASS_MULTIPLIER - 1));
+      delete debtWatchRef.current[d.receiptCode];
+      setTableState((prev) => ({
+        ...prev,
+        players: prev.players.map((x) =>
+          x.id === d.id ? { ...x, alcoholLevel: Math.min(100, x.alcoholLevel + extra) } : x
+        ),
+      }));
+      sound.playMugSlam();
+      showToast(
+        p.isUser
+          ? `🍺⚖️ TRẢ NỢ! Ly đầu tiên của bạn to gấp rưỡi (+${extra}% cồn) — sổ nợ với ${d.creditor} đã gạch!`
+          : `🍺⚖️ ${p.name} trả nợ bằng ly bia TO GẤP RƯỠI (+${extra}% cồn) — gạch tên khỏi Sổ Nợ!`
+      );
+      if (p.isUser) {
+        markNight('⚖️ Ly trả nợ', Math.min(100, p.alcoholLevel + extra));
+        setDebtsOwed((prev) => prev.filter((x) => x.receiptCode !== d.receiptCode));
+      } else {
+        setGrudgesHeld((prev) => prev.filter((x) => x.receiptCode !== d.receiptCode));
+      }
+      settleGrudge(d.receiptCode);
+    }
+  }, [tableState.players, grudgesHeld, myActiveDebt]);
+
+  // Announce at the table that I'm the debtor (the creditor's friends see the poster too)
+  useEffect(() => {
+    if (myActiveDebt) showToast(`⚠️ ${myActiveDebt.creditorName} đang ngồi đây — bạn còn NỢ 1 CHẦU! Ly đầu tiên sẽ to gấp rưỡi.`);
+  }, [myActiveDebt?.receiptCode]);
+
+  const myDebtLabelRef = useRef('');
+  useEffect(() => {
+    myDebtLabelRef.current = myActiveDebt ? debtLabel(myActiveDebt.since) : '';
+    tableNet.client?.sendStatus({
+      alcohol: userPlayer.alcoholLevel,
+      passedOut: userPlayer.isPassedOut,
+      drinks: userPlayer.drinksCount,
+      debt: myDebtLabelRef.current,
+    });
+  }, [myActiveDebt, tableNet.client, tableNet.connection]);
+
   useEffect(() => {
     const st = nightStatsRef.current;
     st.peakAlcohol = Math.max(st.peakAlcohol, userPlayer.alcoholLevel);
@@ -736,7 +925,11 @@ export default function App({
 
   const wasPassedOutRef = useRef(userPlayer.isPassedOut);
   useEffect(() => {
-    if (userPlayer.isPassedOut && !wasPassedOutRef.current) nightStatsRef.current.timesPassedOut += 1;
+    if (userPlayer.isPassedOut && !wasPassedOutRef.current) {
+      nightStatsRef.current.timesPassedOut += 1;
+      markNight('💤 Ngất = Đầu hàng');
+      captureShame('passed_out');
+    }
     wasPassedOutRef.current = userPlayer.isPassedOut;
   }, [userPlayer.isPassedOut]);
 
@@ -768,14 +961,97 @@ export default function App({
     }));
     confetti({ particleCount: 90, spread: 100, origin: { y: 0.4 } });
 
+    const tr = receiptTrackRef.current;
+    if (!tr.shame) captureShame('end');
+    tr.timeline = pushAlcoholSample(tr.timeline, nightSeconds(), userPlayer.alcoholLevel, '🏁 Tàn tiệc');
+    const billParticipants = tr.billOutcome?.participants ?? [];
+    const netId = getNetPlayerId();
+    const table = awardTablemates(
+      scenePlayers.map((p) => {
+        const bill = billParticipants.find((b) => b.playerId === p.id);
+        const remote = p.isRemote ? tableNet.remotePlayers.find((r) => remotePlayerId(r.sessionId) === p.id) : null;
+        return {
+          name: p.isUser ? cleanName : p.name,
+          playerId: p.isUser ? netId : remote ? remote.playerId : botGrudgeId(p.name),
+          avatar: p.avatar,
+          isUser: p.isUser,
+          isRemote: !!p.isRemote,
+          alcohol: p.alcoholLevel,
+          drinks: p.drinksCount,
+          foodEaten: p.foodEatenCount ?? 0,
+          escaped: !!bill?.escaped && !bill?.isDiamondSponsorVictim,
+          escapeAction: bill?.escapeAction,
+          paidBill: !!bill?.isDiamondSponsorVictim,
+        };
+      }),
+      { billTotal: st.billTotal, userLoudestDzoDb: st.loudestDzoDb }
+    );
+    const quotes = topQuotes(tr.quotes);
+    const buildReceipt = (): MatchReceiptInput => ({
+      ownerNetId: netId,
+      ownerName: cleanName,
+      roomId: tableState.roomId,
+      map: tableState.theme,
+      durationSec: Math.round(nightSeconds()),
+      surrenderVotesTriggered: tr.billCalls,
+      surrenderVotesRejected: tr.billRejected,
+      billPayerName: tr.billOutcome
+        ? tr.billOutcome.victim.isUser
+          ? cleanName
+          : tr.billOutcome.victim.playerName
+        : '',
+      totalBillAmount: st.billTotal,
+      billShare: report.billShare,
+      escapedBill: st.escapedBill,
+      paidWholeBill: st.paidWholeBill,
+      score: report.score,
+      rankTitle: report.rankTitle,
+      rankEmoji: report.rankEmoji,
+      commuteChoice: tr.commuteChoice,
+      commuteOutcome:
+        ending.kind === 'caught_checkpoint'
+          ? 'CAUGHT_BY_TRAFFIC_POLICE'
+          : ending.kind === 'grab_home'
+          ? 'GRAB_HOME'
+          : ending.kind === 'rode_home_safe'
+          ? 'HOME_SAFE'
+          : ending.kind === 'passed_out'
+          ? 'CARRIED_HOME_PASSED_OUT'
+          : 'LEFT_TABLE',
+      finePaid: tr.finePaid,
+      stats: {
+        beersChugged: st.drinks,
+        secretlySpilled: tr.spills,
+        toiletRuns: tr.toiletRuns,
+        tacticalPukes: tr.pukes,
+        slippersThrown: st.slippersThrown,
+        slipperHits: st.slipperHits,
+        cansThrown: tr.cansThrown,
+        tablesFlipped: st.tablesFlipped,
+        peakAlcoholPercent: Math.round(st.peakAlcohol),
+        timesPassedOut: st.timesPassedOut,
+        loudestDzoDb: Math.round(st.loudestDzoDb),
+      },
+      alcoholTimeline: tr.timeline,
+      quotes,
+      mostSpammedQuote: quotes[0]?.text ?? '',
+      awardTitle: table.find((m) => m.isUser)?.awardTitle ?? report.rankTitle,
+      funnySnapshot: tr.shame?.url ?? '',
+      funnySnapshotCaption: tr.shame ? SHAME_CAPTIONS[tr.shame.moment] : '',
+      table,
+    });
+
     const token = localStorage.getItem('tram_nhau_auth_token');
-    fetch(`/api/players/${encodeURIComponent(getNetPlayerId())}/night-report`, {
+    // wait (briefly) for the polaroid before filing the receipt
+    Promise.race([tr.shot ?? Promise.resolve(), new Promise((r) => setTimeout(r, 1800))]).then(() =>
+    fetch(`/api/players/${encodeURIComponent(netId)}/night-report`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
+        receipt: buildReceipt(),
         playerName: cleanName,
         roomId: tableState.roomId,
         score: report.score,
@@ -790,10 +1066,59 @@ export default function App({
         timesPassedOut: report.stats.timesPassedOut,
         coinsReward: report.coinsReward,
       }),
-    })
+    }))
       .then((res) => setNightReportSaved(res.ok))
       .catch(() => setNightReportSaved(false));
   };
+
+  // ============================================================================
+  // NGẤT = ĐẦU HÀNG: no wake-up button. The table settles up for the sleeper, the bill
+  // lands on their face, and they're carried home (no ride home when you're out cold).
+  // ============================================================================
+  const passOutSurrenderRef = useRef(false);
+  const passOutTimersRef = useRef<number[]>([]);
+  const tableStateRef = useRef(tableState);
+  tableStateRef.current = tableState;
+  const endNightRef = useRef(endNight);
+  endNightRef.current = endNight;
+  const userKnockedOut = userPlayer.isPassedOut || userPlayer.alcoholLevel >= 100;
+
+  useEffect(() => {
+    if (!userKnockedOut) return;
+    if (passOutSurrenderRef.current || nightEndingRef.current || nightReport || isCommuteModalOpen) return;
+    passOutSurrenderRef.current = true;
+    sceneRef.current?.releasePointerLock();
+    sound.playChairFall();
+    showToast('💤 GỤC = ĐẦU HÀNG! Anh em đang gọi tính tiền giùm bạn...');
+
+    const billTimer = window.setTimeout(() => {
+      const players = tableStateRef.current.players;
+      const result = resolvePassOutSurrender(players, userPlayer.id);
+      sound.playStampSlam();
+      setQteResolution(result);
+      setSurrenderPhase('summary_diamond_sponsor');
+      setTableState((ts) => ({
+        ...ts,
+        players: ts.players.map((p) =>
+          p.id === result.victim.playerId ? { ...p, title: DIAMOND_SPONSOR_TITLE } : p
+        ),
+      }));
+      showToast(result.summaryHeadline);
+    }, PASS_OUT_SURRENDER_DELAY_MS);
+
+    const homeTimer = window.setTimeout(() => {
+      setSurrenderPhase('idle');
+      endNightRef.current({
+        kind: 'passed_out',
+        headline: '💤 Ngất tại bàn = Đầu hàng — lãnh nguyên tờ bill rồi bị anh em khiêng lên xe ôm về nhà',
+        coinsDelta: 0,
+      });
+    }, PASS_OUT_SURRENDER_DELAY_MS + 4500);
+
+    // Once you're out, you're out: reviving mid-way doesn't cancel the surrender
+    passOutTimersRef.current = [billTimer, homeTimer];
+  }, [userKnockedOut]);
+  useEffect(() => () => passOutTimersRef.current.forEach((t) => window.clearTimeout(t)), []);
 
   /** Tăng 2: same crew, new bill, off to the karaoke room (still drunk!). */
   const handleAfterParty = () => {
@@ -801,11 +1126,23 @@ export default function App({
     nightEndingRef.current = false;
     nightStatsRef.current = createNightStats(Date.now(), scenePlayers.length);
     nightStatsRef.current.peakAlcohol = userPlayer.alcoholLevel;
+    receiptTrackRef.current = newReceiptTrack();
+    passOutSurrenderRef.current = false;
     setSurrenderPhase('idle');
     setSurrenderResolution(null);
     setQteResolution(null);
     setMatchElapsedSeconds(0);
-    setTableState((prev) => ({ ...prev, totalBill: 0, beerTowerLevel: 100 }));
+    // Tăng 2: the sleeper wakes up in the karaoke room (still tipsy, no longer KO)
+    setTableState((prev) => ({
+      ...prev,
+      totalBill: 0,
+      beerTowerLevel: 100,
+      players: prev.players.map((p) =>
+        p.isUser && (p.isPassedOut || p.alcoholLevel >= 100)
+          ? { ...p, isPassedOut: false, alcoholLevel: 70, stamina: Math.max(40, p.stamina) }
+          : p
+      ),
+    }));
     setCupState((prev) => ({ ...prev, liquidLevel: 100, warmSeconds: 0 }));
     sceneRef.current?.physicsResetProps();
     handleChangePartyStage('karaoke_stage2');
@@ -819,6 +1156,9 @@ export default function App({
     st.billTotal = tableState.totalBill;
     st.paidWholeBill = !!me?.isDiamondSponsorVictim;
     st.escapedBill = !!me?.escaped && !me?.isDiamondSponsorVictim;
+    receiptTrackRef.current.billOutcome = qteResolution;
+    markNight(st.paidWholeBill ? '💸 Úp sọt trả bill' : st.escapedBill ? '🏃 Trốn bill' : '🧾 Tính tiền');
+    if (st.paidWholeBill) captureShame('paid_bill');
     nightEndingRef.current = true;
     netClientRef.current?.sendEvent({
       kind: 'night_end',
@@ -2444,6 +2784,8 @@ export default function App({
     // If heavily drunk (>70%), 40% chance hand shakes and spills beer on shirt!
     if (userPlayer.alcoholLevel > 70 && Math.random() < 0.4) {
       sound.playSplash();
+      receiptTrackRef.current.spills += 1;
+      captureShame('spill');
       showToast(
         '🍺💦 Tay run quá! Bạn đưa ly lệch tâm làm đổ cả bọt bia ướt nhẹp áo ba lỗ!'
       );
@@ -3389,6 +3731,7 @@ export default function App({
       }));
     } else {
       sound.playHeadbutt();
+      receiptTrackRef.current.cansThrown += 1;
       const hitName = sceneRef.current?.triggerThrowAtFriend();
       setTableState((prev) => ({
         ...prev,
@@ -3411,6 +3754,9 @@ export default function App({
       return;
     }
     sound.playPour();
+    receiptTrackRef.current.toiletRuns += 1;
+    markNight('🚽 WC', Math.max(0, userPlayer.alcoholLevel - 25));
+    captureShame('toilet');
     setTableState((prev) => ({
       ...prev,
       players: prev.players.map((p) =>
@@ -3663,16 +4009,6 @@ export default function App({
     showToast('🎨 Đã lưu tác phẩm vẽ bậy lên mặt bạn say sập nguồn!');
   };
 
-  const handleWakeUp = () => {
-    sound.playPour();
-    setTableState((prev) => {
-      const updated = prev.players.map((p) =>
-        p.isUser ? { ...p, alcoholLevel: 65, stamina: 50, isPassedOut: false } : p
-      );
-      return { ...prev, players: updated };
-    });
-    showToast('☕ Đã húp trọn ly nước chanh đá giải rượu! Tỉnh táo trở lại!');
-  };
 
   // ============================================================================
   // LIVING CHAOS ARENA HANDLERS (5 NPCs, Weather, Urban Patrol & 4-Stage Flow)
@@ -4075,6 +4411,7 @@ export default function App({
   // ============================================================================
   const handleSendDrunkChat = (rawText: string, processed: ProcessedDrunkChat) => {
     setActiveChatBubble(processed);
+    receiptTrackRef.current.quotes = countQuote(receiptTrackRef.current.quotes, rawText);
     // Everyone at the table sees the slurred version, not what you meant to type
     tableNet.client?.sendChat(processed.displayText, userPlayer.alcoholLevel);
     setArenaState((prev) => ({
@@ -4138,6 +4475,10 @@ export default function App({
     setSurrenderResolution(result);
 
     if (result.outcome === 'REJECTED') {
+      if (caller.id === userPlayer.id) {
+        receiptTrackRef.current.billRejected += 1;
+        markNight('🍺 Bác bỏ — ly phạt');
+      }
       // Kịch bản 1: BÁC BỎ! NHẬU TIẾP! + Xé đôi hóa đơn + Phạt 100% ly bia đầy tràn + Rơi két bia mới từ trên trời + Khóa nút 2 phút
       sound.playPaperRip();
       setTimeout(() => sound.playStampSlam(), 140);
@@ -4230,6 +4571,8 @@ export default function App({
         Math.floor(Math.random() * CALL_BILL_VOICE_LINES.length)
       ];
     sound.playCallBillDramatic();
+    receiptTrackRef.current.billCalls += 1;
+    markNight('🧾 Đòi về');
     sceneRef.current?.triggerAirSignBill(userPlayer.id);
 
     setActiveChatBubble({
@@ -4592,7 +4935,16 @@ export default function App({
       selectedBikeSkin: userPlayer.selectedBikeSkin || 'dream_chien',
     });
 
+    receiptTrackRef.current.commuteChoice =
+      result.option === 'grab_vip_return'
+        ? 'GRAB_VIP'
+        : result.option === 'drunk_self_drive'
+        ? 'SELF_DRIVE_MOTO'
+        : 'NONE';
+    receiptTrackRef.current.finePaid = result.caughtByPoliceCheckpoint ? Math.max(0, -result.coinsDelta) : 0;
     if (result.caughtByPoliceCheckpoint) {
+      markNight('🚔 Dính chốt');
+      captureShame('caught_police');
       sound.playStampSlam();
     } else {
       confetti({ particleCount: 55, spread: 70, origin: { y: 0.6 } });
@@ -4784,6 +5136,9 @@ export default function App({
 
     if (archetype === 'lion_puker') {
       sound.playSplash();
+      receiptTrackRef.current.pukes += 1;
+      markNight('🤮 Gọi Huệ', Math.max(0, userPlayer.alcoholLevel - 30));
+      captureShame('puke');
       setTableState((prev) => ({
         ...prev,
         players: prev.players.map((p) =>
@@ -5109,7 +5464,6 @@ export default function App({
             isSpicedMouth={userPlayer.isSpicedMouth}
             spotlightVictimName={spotlightVictimName}
             cheatingAlertText={cheatingAlertText}
-            onWakeUp={handleWakeUp}
           />
 
           {nightReport && (
@@ -5124,6 +5478,17 @@ export default function App({
                 onExitToMenu?.();
               }}
             />
+          )}
+
+          {/* Sổ Nợ Gia Truyền: wanted posters over bill dodgers who still owe a round */}
+          {!isCommuteModalOpen && <WantedSignsHUD sceneRef={sceneRef} signs={wantedSigns} />}
+          {!isCommuteModalOpen && myActiveDebt && (
+            <div
+              data-testid="my-debt-banner"
+              className="fixed top-16 left-1/2 -translate-x-1/2 z-[30] pointer-events-none rounded-lg border-2 border-amber-900 bg-[#f3e2b3] px-3 py-1 text-[11px] font-black text-red-800 shadow-lg wanted-sway"
+            >
+              🪧 BẠN ĐANG BỊ TRUY NÃ: NỢ {myActiveDebt.creditorName} 1 CHẦU — ly đầu tiên to gấp rưỡi!
+            </div>
           )}
 
           {/* Realtime table (Colyseus): online roster, overhead chat bubbles for remote humans */}
@@ -5561,6 +5926,10 @@ export default function App({
         }}
         onCloseOrContinueParty={() => setSurrenderPhase('idle')}
         onStartReturnCommute={() => {
+          if (passOutSurrenderRef.current) {
+            showToast('💤 Ngất rồi còn đòi lái xe! Ngồi yên đó anh em khiêng về...');
+            return;
+          }
           setSurrenderPhase('idle');
           handleOpenCommuteModal('return');
         }}

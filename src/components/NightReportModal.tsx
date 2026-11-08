@@ -17,6 +17,7 @@ const ENDING_STYLE: Record<NightReport['ending']['kind'], { label: string; tone:
   grab_home: { label: '🚕 Gọi Grab về an toàn', tone: 'text-sky-300 border-sky-500/60' },
   caught_checkpoint: { label: '🚨 Dính chốt CSGT — xe về đồn', tone: 'text-red-300 border-red-500/60' },
   left_table: { label: '🚪 Rời bàn sớm', tone: 'text-zinc-300 border-zinc-500/60' },
+  passed_out: { label: '💤 Gục tại bàn = Đầu hàng — bị khiêng về', tone: 'text-purple-300 border-purple-500/60' },
 };
 
 /** "Biên Bản Cuối Buổi": the night is over — stats, rank, table ranking, then menu or tăng 2. */

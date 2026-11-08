@@ -203,6 +203,7 @@ export class TableNetClient {
           speaking: p.speaking,
           voiceLevel: p.voiceLevel,
           joinedAt: p.joinedAt,
+          debt: p.debt ?? '',
         });
       });
       list.sort((a, b) => a.joinedAt - b.joinedAt);

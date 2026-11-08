@@ -515,3 +515,36 @@ export function resolveBillEscapeQTE(params: {
     summaryHeadline: `💎 ${victim.playerName} ${reasonText} và chính thức nhận danh hiệu "${DIAMOND_SPONSOR_TITLE}"!`,
   };
 }
+
+/** How long the "GỤC = ĐẦU HÀNG" blackout lasts before the bill lands on the sleeper. */
+export const PASS_OUT_SURRENDER_DELAY_MS = 4000;
+
+/**
+ * Ngất = đầu hàng: the sleeper can't vote, can't run to the WC, can't tie a shoelace.
+ * No vote is held — the table settles up on the spot and the bill lands on the one who
+ * passed out. Everyone still awake slips away; other sleepers stay asleep (not escaped).
+ */
+export function resolvePassOutSurrender(players: Player[], sleeperId: string): BillEscapeResolution {
+  const participants: BillEscapeParticipantResult[] = players.map((p, idx) => {
+    const isSleeper = p.id === sleeperId;
+    const knockedOut = isSleeper || p.isPassedOut || p.alcoholLevel >= 100;
+    return {
+      playerId: p.id,
+      playerName: p.name,
+      avatar: p.avatar,
+      isUser: p.isUser,
+      isPassedOut: knockedOut,
+      escapeScore: isSleeper ? -100 : knockedOut ? -10 - idx : 5 + idx,
+      escapeAction: knockedOut ? 'none' : idx % 2 === 0 ? 'run_wc' : 'tie_shoelace',
+      escaped: !knockedOut,
+      isDiamondSponsorVictim: isSleeper,
+    };
+  });
+  const victim = participants.find((p) => p.isDiamondSponsorVictim) ?? participants[0];
+  return {
+    victim,
+    participants,
+    awardedTitle: DIAMOND_SPONSOR_TITLE,
+    summaryHeadline: `💤 ${victim.playerName} GỤC = ĐẦU HÀNG! Cả bàn gọi tính tiền giùm, tờ hóa đơn đáp thẳng lên mặt — "${DIAMOND_SPONSOR_TITLE}"!`,
+  };
+}

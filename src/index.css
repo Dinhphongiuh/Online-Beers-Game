@@ -266,3 +266,66 @@
 @media (prefers-reduced-motion: reduce) {
   .cauvang-tail { animation: none; }
 }
+
+/* ---- Sổ Nợ Gia Truyền: wanted posters, the hangover book, its cockroach ---- */
+@keyframes wantedSway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.wanted-sway { animation: wantedSway 2.4s ease-in-out infinite; transform-origin: top center; }
+
+@keyframes bookOpen {
+  0% { transform: perspective(1400px) rotateY(-80deg) scale(0.85); opacity: 0; }
+  60% { transform: perspective(1400px) rotateY(8deg) scale(1.01); opacity: 1; }
+  100% { transform: perspective(1400px) rotateY(0) scale(1); }
+}
+.book-open { animation: bookOpen 0.55s cubic-bezier(0.2, 0.8, 0.3, 1) both; transform-origin: left center; }
+
+@keyframes cockroachDash {
+  0% { transform: translate(0, 0) rotate(-100deg); opacity: 0; }
+  8% { opacity: 1; }
+  45% { transform: translate(-38vw, -6vh) rotate(-96deg); }
+  55% { transform: translate(-44vw, -9vh) rotate(-60deg); }
+  100% { transform: translate(-92vw, -4vh) rotate(-95deg); opacity: 1; }
+}
+.cockroach-dash {
+  animation: cockroachDash 1.6s cubic-bezier(0.5, 0, 0.6, 1) 0.35s both;
+  filter: drop-shadow(2px 4px 2px rgba(0, 0, 0, 0.45));
+}
+
+@keyframes receiptUnfold {
+  0% { transform: scaleY(0.15) rotate(-2deg); opacity: 0; }
+  100% { transform: scaleY(1) rotate(0); opacity: 1; }
+}
+.receipt-unfold { animation: receiptUnfold 0.32s ease-out both; transform-origin: top center; }
+
+/* torn / zig-zag paper edge for receipts */
+.receipt-zigzag {
+  --zz: 7px;
+  -webkit-mask:
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / calc(2 * var(--zz)) 100%;
+  mask:
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / calc(2 * var(--zz)) 100%;
+}
+.receipt-crumpled {
+  background-image:
+    linear-gradient(115deg, transparent 30%, rgba(0, 0, 0, 0.07) 31%, transparent 34%),
+    linear-gradient(62deg, transparent 55%, rgba(0, 0, 0, 0.08) 56%, transparent 59%),
+    linear-gradient(170deg, transparent 20%, rgba(255, 255, 255, 0.5) 21%, transparent 24%),
+    radial-gradient(circle at 70% 30%, rgba(120, 72, 0, 0.12), transparent 40%);
+}
+.beer-stain {
+  background: radial-gradient(circle, transparent 52%, rgba(180, 120, 20, 0.28) 55%, rgba(180, 120, 20, 0.12) 62%, transparent 66%);
+}
+.grease-stain {
+  background: radial-gradient(ellipse, rgba(140, 90, 20, 0.22), rgba(140, 90, 20, 0.08) 55%, transparent 70%);
+}
+.ecg-paper {
+  background-color: #fff5f5;
+  background-image:
+    linear-gradient(rgba(239, 68, 68, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(239, 68, 68, 0.18) 1px, transparent 1px),
+    linear-gradient(rgba(239, 68, 68, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(239, 68, 68, 0.08) 1px, transparent 1px);
+  background-size: 25px 25px, 25px 25px, 5px 5px, 5px 5px;
+}

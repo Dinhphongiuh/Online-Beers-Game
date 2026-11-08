@@ -9,7 +9,6 @@ interface DrunkEffectOverlayProps {
   isSpicedMouth?: boolean;
   spotlightVictimName?: string | null;
   cheatingAlertText?: string | null;
-  onWakeUp: () => void;
 }
 
 export const DrunkEffectOverlay: React.FC<DrunkEffectOverlayProps> = ({
@@ -21,7 +20,6 @@ export const DrunkEffectOverlay: React.FC<DrunkEffectOverlayProps> = ({
   isSpicedMouth = false,
   spotlightVictimName = null,
   cheatingAlertText = null,
-  onWakeUp,
 }) => {
   const [isDozingBlink, setIsDozingBlink] = useState(false);
 
@@ -160,19 +158,18 @@ export const DrunkEffectOverlay: React.FC<DrunkEffectOverlayProps> = ({
       {isPassedOut && (
         <div className="w-full h-full bg-black/85 pointer-events-auto flex flex-col items-center justify-center p-6 text-white text-center">
           <div className="text-7xl mb-4 select-none animate-bounce">😵‍💫</div>
-          <h2 className="text-2xl font-black text-red-500 mb-2">
-            BẠN ĐÃ CHÍNH THỨC SẬP NGUỒN! (100% CỒN)
+          <h2 data-testid="passed-out-surrender" className="text-2xl font-black text-red-500 mb-1">
+            💤 GỤC = ĐẦU HÀNG! (100% CỒN)
           </h2>
-          <p className="text-sm text-zinc-300 max-w-md mb-4">
-            Bạn đã gục mặt xuống bàn inox ngủ say như chết! Bạn bè trên bàn đang tranh nhau cầm bút vẽ râu mèo, râu quăn và chụp ảnh dìm hàng bạn!
+          <div className="inline-block mb-3 px-3 py-1 rounded border-4 border-red-600 text-red-500 font-black text-sm rotate-[-4deg] uppercase">
+            Không có nút hồi tỉnh đâu!
+          </div>
+          <p className="text-sm text-zinc-300 max-w-md mb-2">
+            Bạn đã gục mặt xuống bàn inox ngủ say như chết. Ngất là đầu hàng: anh em đang gọi tính tiền giùm, tờ hóa đơn sắp đáp thẳng lên mặt bạn...
           </p>
-
-          <button
-            onClick={onWakeUp}
-            className="py-3 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl font-black text-sm shadow-xl active:scale-95 transition-all text-white flex items-center gap-2"
-          >
-            <span>☕ Uống Cốc Nước Chanh Giải Rượu (Hồi Tỉnh)</span>
-          </button>
+          <p className="text-xs text-zinc-400 max-w-md animate-pulse">
+            🧾 Đang tính tiền... 🛵 Ngất thì không lái xe được — lát nữa anh em khiêng bạn lên xe ôm về.
+          </p>
         </div>
       )}
     </div>

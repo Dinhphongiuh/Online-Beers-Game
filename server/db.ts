@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 import crypto from 'crypto';
 import { BackendUnavailableError } from './errors.ts';
 import { normalizeEmail, normalizeUsername, usernameKey } from '../shared/validation.ts';
+import { BURN_SNAPSHOT_COST, type MatchReceipt, type MatchReceiptInput } from '../shared/receipts.ts';
 
 // Ensure Mongoose fails fast without buffering when DB is offline
 mongoose.set('bufferCommands', false);
@@ -109,6 +110,8 @@ export interface IPlayerProfile extends Document {
   nightsCompleted?: number;
   bestNightScore?: number;
   nightReports?: NightReportRecord[];
+  /** Receipt shown on the Hộ Chiếu's front page ("Ghim lên trang nhất"). */
+  pinnedReceiptCode?: string;
   lastActive: Date;
 }
 
@@ -194,6 +197,7 @@ const PlayerProfileSchema = new Schema<IPlayerProfile>(
     nightsCompleted: { type: Number, default: 0 },
     bestNightScore: { type: Number, default: 0 },
     nightReports: { type: [Schema.Types.Mixed], default: [] },
+    pinnedReceiptCode: { type: String, default: '' },
     lastActive: { type: Date, default: Date.now },
   },
   { timestamps: true }
@@ -241,6 +245,53 @@ const UserSchema = new Schema<IUser>(
   },
   { timestamps: true }
 );
+
+/** "Sổ Nợ Gia Truyền": one Tờ Hóa Đơn Ký Ức per player per night (collection match_receipts). */
+const MatchReceiptSchema = new Schema(
+  {
+    receiptCode: { type: String, required: true, unique: true },
+    ownerId: { type: String, required: true },
+    ownerNetId: { type: String, default: '' },
+    ownerName: String,
+    roomId: String,
+    map: String,
+    durationSec: Number,
+    surrenderVotesTriggered: Number,
+    surrenderVotesRejected: Number,
+    billPayerName: String,
+    totalBillAmount: Number,
+    billShare: Number,
+    escapedBill: Boolean,
+    paidWholeBill: Boolean,
+    score: Number,
+    rankTitle: String,
+    rankEmoji: String,
+    commuteChoice: String,
+    commuteOutcome: String,
+    finePaid: Number,
+    stats: Schema.Types.Mixed,
+    alcoholTimeline: Schema.Types.Mixed,
+    quotes: Schema.Types.Mixed,
+    mostSpammedQuote: String,
+    awardTitle: String,
+    funnySnapshot: String,
+    funnySnapshotCaption: String,
+    snapshotBurned: { type: Boolean, default: false },
+    table: Schema.Types.Mixed,
+    grudge: { type: Schema.Types.Mixed, default: null },
+  },
+  { timestamps: true, collection: 'match_receipts' }
+);
+MatchReceiptSchema.index({ ownerId: 1, createdAt: -1 });
+MatchReceiptSchema.index({ 'grudge.targetId': 1, 'grudge.settled': 1 });
+MatchReceiptSchema.index({ ownerNetId: 1, 'grudge.settled': 1 });
+
+export const MatchReceiptModel = mongoose.model('MatchReceipt', MatchReceiptSchema);
+
+const toReceipt = (doc: any): MatchReceipt => {
+  const { _id, __v, updatedAt, createdAt, ...rest } = doc;
+  return { ...rest, createdAt: new Date(createdAt).getTime() } as MatchReceipt;
+};
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);
 export const RoomModel = mongoose.model<IRoom>('Room', RoomSchema);
@@ -449,6 +500,126 @@ export const dbService = {
       },
       { returnDocument: 'after' }
     ).lean();
+  },
+
+  // --- SỔ NỢ GIA TRUYỀN (match receipts) ---
+  async createMatchReceipt(ownerId: string, input: MatchReceiptInput): Promise<MatchReceipt> {
+    requireMongo();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const receiptCode = `BILL-${Math.floor(1000 + Math.random() * 9000)}${attempt ? attempt : ''}`;
+      try {
+        const doc = await MatchReceiptModel.create({ ...input, ownerId, receiptCode, grudge: null });
+        return toReceipt(doc.toObject());
+      } catch (err) {
+        if (!isDuplicateKeyError(err, 'receiptCode')) throw err;
+      }
+    }
+    throw new Error('Could not allocate a receipt code');
+  },
+
+  async listMatchReceipts(ownerId: string, limit = 15): Promise<MatchReceipt[]> {
+    requireMongo();
+    const docs = await MatchReceiptModel.find({ ownerId }).sort({ createdAt: -1 }).limit(limit).lean();
+    return docs.map(toReceipt);
+  },
+
+  /** Light projection of every receipt (no photos / timelines) for the lifetime stats. */
+  async listReceiptStats(ownerId: string) {
+    requireMongo();
+    return MatchReceiptModel.find(
+      { ownerId },
+      { stats: 1, quotes: 1, escapedBill: 1, paidWholeBill: 1, billShare: 1, commuteOutcome: 1, finePaid: 1, score: 1 }
+    )
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .lean();
+  },
+
+  async getMatchReceipt(receiptCode: string): Promise<MatchReceipt | null> {
+    requireMongo();
+    const doc = await MatchReceiptModel.findOne({ receiptCode }).lean();
+    return doc ? toReceipt(doc) : null;
+  },
+
+  async setReceiptGrudge(receiptCode: string, ownerId: string, grudge: NonNullable<MatchReceipt['grudge']>) {
+    requireMongo();
+    const doc = await MatchReceiptModel.findOneAndUpdate(
+      { receiptCode, ownerId, grudge: null },
+      { $set: { grudge } },
+      { returnDocument: 'after' }
+    ).lean();
+    return doc ? toReceipt(doc) : null;
+  },
+
+  async settleGrudge(receiptCode: string) {
+    requireMongo();
+    const doc = await MatchReceiptModel.findOneAndUpdate(
+      { receiptCode, 'grudge.settled': false },
+      { $set: { 'grudge.settled': true, 'grudge.settledAt': Date.now() } },
+      { returnDocument: 'after' }
+    ).lean();
+    return doc ? toReceipt(doc) : null;
+  },
+
+  /** Open grudges where `netId` / `ownerId` is the creditor. */
+  async listOpenGrudgesByCreditor(ownerId: string, netId: string) {
+    requireMongo();
+    const docs = await MatchReceiptModel.find(
+      { $or: [{ ownerId }, ...(netId ? [{ ownerNetId: netId }] : [])], 'grudge.settled': false },
+      { receiptCode: 1, ownerId: 1, ownerNetId: 1, ownerName: 1, grudge: 1, createdAt: 1 }
+    )
+      .limit(50)
+      .lean();
+    return docs.map(toReceipt);
+  },
+
+  /** Open grudges where `targetId` owes somebody a round. */
+  async listOpenDebts(targetIds: string[]) {
+    requireMongo();
+    const docs = await MatchReceiptModel.find(
+      { 'grudge.targetId': { $in: targetIds }, 'grudge.settled': false },
+      { receiptCode: 1, ownerId: 1, ownerNetId: 1, ownerName: 1, grudge: 1, createdAt: 1 }
+    )
+      .limit(50)
+      .lean();
+    return docs.map(toReceipt);
+  },
+
+  async pinReceipt(playerId: string, receiptCode: string) {
+    requireMongo();
+    return PlayerProfileModel.findOneAndUpdate(
+      { playerId },
+      { $set: { pinnedReceiptCode: receiptCode } },
+      { returnDocument: 'after' }
+    ).lean();
+  },
+
+  /**
+   * "Đốt Phi Tang Ảnh": pay 20 Nắp from the passport wallet to wipe the photo.
+   * Returns null when the wallet is short (the photo stays).
+   */
+  async burnReceiptSnapshot(ownerId: string, receiptCode: string) {
+    requireMongo();
+    const profile = await PlayerProfileModel.findOneAndUpdate(
+      { playerId: ownerId, coins: { $gte: BURN_SNAPSHOT_COST } },
+      { $inc: { coins: -BURN_SNAPSHOT_COST } },
+      { returnDocument: 'after' }
+    ).lean();
+    if (!profile) return null;
+    const receipt = await MatchReceiptModel.findOneAndUpdate(
+      { receiptCode, ownerId, snapshotBurned: false },
+      { $set: { funnySnapshot: '', snapshotBurned: true } },
+      { returnDocument: 'after' }
+    ).lean();
+    if (!receipt) {
+      // nothing to burn: refund
+      await PlayerProfileModel.updateOne({ playerId: ownerId }, { $inc: { coins: BURN_SNAPSHOT_COST } });
+      return null;
+    }
+    if (profile.pinnedReceiptCode === receiptCode) {
+      await PlayerProfileModel.updateOne({ playerId: ownerId }, { $set: { pinnedReceiptCode: '' } });
+    }
+    return { coins: profile.coins, receipt: toReceipt(receipt) };
   },
 
   async getLeaderboard(limit = 10) {

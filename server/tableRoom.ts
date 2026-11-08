@@ -38,6 +38,7 @@ export const NetPlayerState = schema(
     speaking: t.boolean(),
     voiceLevel: t.float32(),
     joinedAt: t.float64(),
+    debt: t.string(),
   },
   'NetPlayerState'
 );
@@ -106,6 +107,7 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
       p.alcohol = Math.round(st.alcohol);
       p.passedOut = st.passedOut;
       p.drinks = st.drinks;
+      p.debt = st.debt ?? '';
     });
 
     this.onMessage(MSG.voice, (client, raw: { speaking?: unknown; level?: unknown }) => {
