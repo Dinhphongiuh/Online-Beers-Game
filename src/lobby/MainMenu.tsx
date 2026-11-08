@@ -13,7 +13,8 @@ import {
   TableRules,
   THEME_NAMES,
   LOBBY_MAPS,
-  buildFriendList,
+  LobbyFriend,
+  customNpcToPlayer,
   drinkingRank,
   randomRoomCode,
 } from './lobbyData';
@@ -30,6 +31,45 @@ import {
   sfx,
 } from './LobbyPanels';
 import { AuthPanelModal, AuthUserSession } from '../components/AuthPanelModal';
+import { FriendsPanel, type NpcEntry } from './FriendsPanel';
+import { NpcCreatorModal } from './NpcCreatorModal';
+import { socialApi, useCustomNpcs, useSocial } from '../net/socialApi';
+import { presenceNote, type CustomNpc } from '../../shared/social';
+
+/** Notes for the built-in regulars in the NPC tab. */
+const BUILTIN_NPC_NOTES: Record<string, string> = {
+  bot_phiquan: 'NPC quen • hay gọi NYC lúc say',
+  bot_khoanguyen: 'NPC quen • thích leo cây',
+  bot_baonguyen: 'NPC quen • chuyên gắp miếng ngon',
+  bot_ngaphan: 'NPC quen • chỉ uống Coca',
+};
+
+/** Default regulars who never make it to your table: one is busy elsewhere, one lost his phone to his wife. */
+const UNAVAILABLE_NPCS: NpcEntry[] = [
+  {
+    player: {
+      id: 'npc_off_tuan', name: 'Tuấn Xỉn', isUser: false, avatar: 'duck', clothing: 'floral_shirt', hat: 'sunglasses',
+      glassType: 'coi_glass', alcoholLevel: 62, stamina: 40, seatIndex: 0, coins: 0, gems: 0, title: 'Đang ở Tăng 3',
+      isPassedOut: false, faceDoodles: [], drinksCount: 9,
+    },
+    note: 'Đang nhậu bàn khác (Tăng 3) 🍻',
+    unavailable: 'drinking',
+  },
+  {
+    player: {
+      id: 'npc_off_hung', name: 'Hùng Bia Hơi', isUser: false, avatar: 'dog', clothing: 'tanktop_white', hat: 'none',
+      glassType: 'beer_mug', alcoholLevel: 0, stamina: 100, seatIndex: 0, coins: 0, gems: 0, title: 'Bị quản thúc tại gia',
+      isPassedOut: false, faceDoodles: [], drinksCount: 0,
+    },
+    note: 'Offline • bị vợ tịch thu điện thoại 📵',
+    unavailable: 'offline',
+  },
+];
+
+const npcToleranceNote = (n: CustomNpc) =>
+  `${n.tolerance < 25 ? 'Một lon là gục' : n.tolerance < 50 ? 'Lai rai' : n.tolerance < 80 ? 'Chiến binh' : 'Hũ chìm'}${
+    n.catchphrase ? ` • "${n.catchphrase}"` : ''
+  }`;
 
 type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite' | 'auth';
 
@@ -137,7 +177,43 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [logoFlickerKey, setLogoFlickerKey] = useState(0);
   const [mobileSheet, setMobileSheet] = useState<'none' | 'chat' | 'friends'>('none');
 
-  const friends = useMemo(() => buildFriendList(crew), [crew]);
+  // ---- Friends (real accounts) & NPCs (regulars + player-made) ----
+  const { snapshot: social, error: socialError, refresh: refreshSocial } = useSocial(isLoggedIn);
+  const customNpcs = useCustomNpcs(isLoggedIn);
+  const [npcCreatorOpen, setNpcCreatorOpen] = useState(false);
+  const [invitedFriendIds, setInvitedFriendIds] = useState<string[]>([]);
+  const customPlayers = useMemo(() => customNpcs.npcs.map((n) => customNpcToPlayer(n)), [customNpcs.npcs]);
+  const allNpcs = useMemo(() => [...crew, ...customPlayers], [crew, customPlayers]);
+  const npcEntries = useMemo<NpcEntry[]>(
+    () => [
+      ...crew.map((p) => ({ player: p, note: BUILTIN_NPC_NOTES[p.id] || 'NPC quen mặt' })),
+      ...UNAVAILABLE_NPCS,
+      ...customNpcs.npcs.map((n) => ({ player: customNpcToPlayer(n), custom: n, note: npcToleranceNote(n) })),
+    ],
+    [crew, customNpcs.npcs]
+  );
+  /** Seat popup ("+ Rủ Nhậu"): NPCs sit down right away, real friends get a table invite. */
+  const inviteChoices = useMemo<LobbyFriend[]>(
+    () => [
+      ...(social?.friends ?? []).map((f) => ({
+        id: `user:${f.userId}`,
+        name: f.username,
+        avatar: (f.avatar as LobbyFriend['avatar']) || 'dog',
+        status: f.presence.state,
+        note: presenceNote(f.presence),
+        invitable: f.presence.state !== 'offline' && !invitedFriendIds.includes(f.userId),
+      })),
+      ...npcEntries.map((e) => ({
+        id: e.player.id,
+        name: e.player.name,
+        avatar: e.player.avatar,
+        status: e.unavailable ?? ('online' as const),
+        note: e.note,
+        invitable: !e.unavailable,
+      })),
+    ],
+    [social, npcEntries, invitedFriendIds]
+  );
   const rank = drinkingRank(userTemplate.drinksCount + 8);
 
   const showToast = useCallback(
@@ -165,14 +241,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     };
     const members = squad
       .map((m) => {
-        const p = crew.find((c) => c.id === m.id);
+        const p = allNpcs.find((c) => c.id === m.id);
         if (!p) return null;
         const member: Player = { ...p, seatIndex: m.seatIndex, alcoholLevel: 0, isPassedOut: false, faceDoodles: [] };
         return member;
       })
       .filter((p): p is Player => !!p);
     return [me, ...members];
-  }, [userTemplate, name, skin, squad, crew]);
+  }, [userTemplate, name, skin, squad, allNpcs]);
 
   const playerBySeat = useMemo(() => {
     const m = new Map<number, Player>();
@@ -325,16 +401,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     seatedIds.forEach((id) => {
       if (id === 'user' || greeted.current.has(id)) return;
       greeted.current.add(id);
-      const friend = crew.find((c) => c.id === id);
+      const friend = allNpcs.find((c) => c.id === id);
       if (!friend) return;
       sound.playChairFall();
-      say(friend.name, NPC_ARRIVAL_LINES[Math.floor(Math.random() * NPC_ARRIVAL_LINES.length)]);
+      const custom = customNpcs.npcs.find((n) => customNpcToPlayer(n).id === id);
+      say(
+        friend.name,
+        custom?.catchphrase || NPC_ARRIVAL_LINES[Math.floor(Math.random() * NPC_ARRIVAL_LINES.length)]
+      );
       later(() => {
         setReady((prev) => ({ ...prev, [id]: true }));
         sound.playMugSlam();
       }, 900 + Math.random() * 1600);
     });
-  }, [seatedIds, crew, later, say]);
+  }, [seatedIds, allNpcs, customNpcs.npcs, later, say]);
 
   // Seated friends chatter (mic lights blink) and mess with each other
   useEffect(() => {
@@ -389,41 +469,95 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     [freeSeats]
   );
 
-  const inviteWholeCrew = useCallback(() => {
-    const missing = crew.filter((c) => !squad.some((m) => m.id === c.id));
-    missing.forEach((c, i) => later(() => invite(c.id), 350 + i * 650));
-    return missing.length;
-  }, [crew, squad, invite, later]);
-
   // ---- Start flow ----
   const everyoneReady =
     squad.length > 0 &&
     !!ready.user &&
     squad.every((m) => seatedIds.includes(m.id) && ready[m.id]);
 
-  const startMatch = useCallback(() => {
+  /**
+   * Only the NPCs you invited sit down (nobody invited = drinking alone); real friends join
+   * the same table code once they accept your invite. `joinCode` = entering someone else's table.
+   */
+  const startMatch = useCallback((joinCode?: string) => {
     if (starting) return;
     setStarting(true);
     setPanel('none');
     sound.stopMicCheers();
     sound.playCrowdDzo();
-    const effectiveSquadIds =
-      squad.length > 0
-        ? [...squad].sort((a, b) => a.seatIndex - b.seatIndex).map((m) => m.id)
-        : crew.map((c) => c.id);
+    // Guests at someone else's table don't bring their own NPCs along
+    const seated = joinCode ? [] : [...squad].sort((a, b) => a.seatIndex - b.seatIndex);
+    const squadIds = seated.map((m) => m.id);
     onStart(
       {
         playerName: name.trim() || 'Bợm Nhậu',
         skin,
-        squadIds: effectiveSquadIds,
+        squadIds,
+        customNpcs: customPlayers.filter((p) => squadIds.includes(p.id)),
         theme: map,
         drunkSpeed,
         rules,
-        roomCode,
+        roomCode: joinCode ?? roomCode,
       },
       graphics
     );
-  }, [starting, name, skin, squad, crew, map, drunkSpeed, rules, roomCode, graphics, onStart]);
+  }, [starting, name, skin, squad, customPlayers, map, drunkSpeed, rules, roomCode, graphics, onStart]);
+
+  // ---- Friends actions ----
+  const handleInviteFriend = async (userId: string, username: string) => {
+    try {
+      await socialApi.inviteToTable(userId, roomCode);
+      sound.playHornBeep();
+      setInvitedFriendIds((prev) => [...prev, userId]);
+      showToast(`📲 Đã rủ ${username} vào bàn #${roomCode} — nhận lời là ngồi chung bàn!`);
+    } catch (err) {
+      showToast(`⚠️ ${err instanceof Error ? err.message : 'Không rủ được'}`);
+    }
+  };
+  const handleSendFriendRequest = async (username: string) => {
+    const r = await socialApi.requestFriend(username);
+    void refreshSocial();
+    return r.message;
+  };
+  const handleAcceptFriend = async (userId: string) => {
+    try {
+      await socialApi.accept(userId);
+      sound.playMugSlam();
+    } catch (err) {
+      showToast(`⚠️ ${err instanceof Error ? err.message : 'Lỗi'}`);
+    }
+    void refreshSocial();
+  };
+  const handleRemoveFriend = async (userId: string) => {
+    try {
+      await socialApi.remove(userId);
+    } catch (err) {
+      showToast(`⚠️ ${err instanceof Error ? err.message : 'Lỗi'}`);
+    }
+    void refreshSocial();
+  };
+  const handleDeleteNpc = async (npc: CustomNpc) => {
+    try {
+      await customNpcs.remove(npc.npcId);
+      const pid = customNpcToPlayer(npc).id;
+      setSquad((prev) => prev.filter((m) => m.id !== pid));
+      showToast(`🗑️ Đã cho ${npc.name} nghỉ nhậu`);
+    } catch (err) {
+      showToast(`⚠️ ${err instanceof Error ? err.message : 'Lỗi'}`);
+    }
+  };
+  const handleAcceptTableInvite = async (inviteId: string, code: string, fromName: string) => {
+    await socialApi.dismissInvite(inviteId).catch(() => null);
+    sound.playBottleOpen();
+    showToast(`🛵 Đang chạy qua bàn #${code} của ${fromName}...`);
+    setRoomCode(code);
+    setHostName(fromName);
+    startMatch(code);
+  };
+  const handleDismissTableInvite = async (inviteId: string) => {
+    await socialApi.dismissInvite(inviteId).catch(() => null);
+    void refreshSocial();
+  };
 
   // Quick play / join: start automatically once the table fills up and everyone is ready
   useEffect(() => {
@@ -435,7 +569,11 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
   const handleQuickPlay = () => {
     sound.playBottleOpen();
-    showToast('🏠➔🛵 Đang khởi hành từ căn nhà ống trong hẻm ra quán nhậu!');
+    showToast(
+      squad.length
+        ? '🏠➔🛵 Đang khởi hành từ căn nhà ống trong hẻm ra quán nhậu!'
+        : '🍺 Chưa rủ ai — hôm nay nhậu một mình!'
+    );
     startMatch();
   };
 
@@ -552,44 +690,25 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   );
 
   const friendsBox = (
-    <div className="w-full rounded-2xl bg-zinc-950/85 border border-zinc-700/80 backdrop-blur-md shadow-xl p-2.5">
-      <div className="flex items-center justify-between text-[11px] font-black text-amber-300 mb-1.5 px-0.5">
-        <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Bạn Bè Online</span>
-        <span className="text-zinc-500">{friends.filter((f) => f.status !== 'offline').length}/{friends.length}</span>
-      </div>
-      <div className="space-y-1">
-        {friends.map((f) => {
-          const seated = squad.some((m) => m.id === f.id);
-          return (
-            <div key={f.id} className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-white/5">
-              <span className="relative text-lg leading-none">
-                {AVATAR_ICON[f.avatar]}
-                <span
-                  className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-950 ${
-                    f.status === 'online' ? 'bg-emerald-400' : f.status === 'drinking' ? 'bg-amber-400' : 'bg-zinc-600'
-                  }`}
-                />
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-[12px] font-bold text-zinc-100 truncate">{f.name}</span>
-                <span className="block text-[9px] text-zinc-500 truncate">{f.note}</span>
-              </span>
-              {f.invitable && (
-                <button
-                  {...sfx}
-                  disabled={seated || starting}
-                  onClick={() => invite(f.id)}
-                  className="px-2 py-0.5 rounded-md text-[10px] font-black cursor-pointer bg-amber-500 hover:bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-default"
-                >
-                  {seated ? 'Ở bàn' : 'Rủ'}
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <FriendsPanel
+      social={social}
+      socialError={socialError}
+      npcs={npcEntries}
+      seatedNpcIds={squad.map((m) => m.id)}
+      invitedFriendIds={invitedFriendIds}
+      roomCode={roomCode}
+      disabled={starting}
+      onInviteNpc={(id) => invite(id)}
+      onOpenNpcCreator={() => setNpcCreatorOpen(true)}
+      onDeleteNpc={handleDeleteNpc}
+      onInviteFriend={handleInviteFriend}
+      onSendFriendRequest={handleSendFriendRequest}
+      onAcceptFriend={handleAcceptFriend}
+      onRemoveFriend={handleRemoveFriend}
+    />
   );
+
+  const tableInvites = social?.invites ?? [];
 
   return (
     <div className="relative w-full h-screen overflow-hidden bg-zinc-950 text-white">
@@ -954,12 +1073,10 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           onJoin={(code) => {
             sound.playBottleOpen();
             setRoomCode(code);
-            setHostName(crew[0]?.name || 'Chủ bàn');
+            setHostName('Chủ bàn');
             setPanel('none');
-            setReady((prev) => ({ ...prev, user: true }));
-            inviteWholeCrew();
-            setPendingStart(true);
-            showToast(`🪑 Đã nhảy vào bàn #${code}! Anh em đang kéo ghế ra ngồi…`);
+            showToast(`🪑 Đang nhảy vào bàn #${code}...`);
+            startMatch(code);
           }}
         />
       )}
@@ -996,15 +1113,62 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       {panel === 'invite' && (
         <InvitePopup
           roomCode={roomCode}
-          friends={friends}
+          friends={inviteChoices}
           seatedIds={squad.map((m) => m.id)}
           onInvite={(id) => {
-            invite(id, inviteSeat);
+            if (id.startsWith('user:')) {
+              const userId = id.slice(5);
+              const f = social?.friends.find((x) => x.userId === userId);
+              void handleInviteFriend(userId, f?.username ?? 'bạn');
+            } else {
+              invite(id, inviteSeat);
+            }
             setPanel('none');
           }}
           onClose={() => setPanel('none')}
         />
       )}
+      {npcCreatorOpen && (
+        <NpcCreatorModal
+          count={customNpcs.npcs.length}
+          onCreate={async (npc) => {
+            const created = await customNpcs.create(npc);
+            showToast(`🤖 ${created.name} đã vào danh sách NPC — bấm "Rủ" để kéo vào bàn!`);
+          }}
+          onClose={() => setNpcCreatorOpen(false)}
+        />
+      )}
+
+      {/* "X rủ bạn vào bàn #1234" */}
+      {!starting && tableInvites.length > 0 && (
+        <div className="absolute z-40 top-16 left-1/2 -translate-x-1/2 w-[min(380px,92vw)] space-y-1.5">
+          {tableInvites.map((inv) => (
+            <div
+              key={inv.id}
+              data-testid="table-invite-card"
+              className="flex items-center gap-2 rounded-xl border-2 border-amber-400 bg-zinc-950/95 px-3 py-2 shadow-2xl"
+            >
+              <span className="text-2xl">{AVATAR_ICON[inv.fromAvatar as keyof typeof AVATAR_ICON] ?? '🍺'}</span>
+              <span className="flex-1 min-w-0 text-[12px] text-amber-100">
+                <b>{inv.fromName}</b> rủ bạn vào bàn <b className="font-mono">#{inv.roomCode}</b> 🍻
+              </span>
+              <button
+                onClick={() => handleAcceptTableInvite(inv.id, inv.roomCode, inv.fromName)}
+                className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-[11px] font-black cursor-pointer"
+              >
+                Vào bàn
+              </button>
+              <button
+                onClick={() => handleDismissTableInvite(inv.id)}
+                className="px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 text-[11px] font-black cursor-pointer"
+              >
+                Bận
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {panel === 'auth' && !isLoggedIn && (
         <AuthPanelModal
           isOpen={true}

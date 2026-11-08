@@ -5,6 +5,7 @@ import { LobbyConfig } from './lobby/lobbyData';
 import { GraphicsQuality } from './lobby/LobbyPanels';
 import { AuthPanelModal, AuthUserSession } from './components/AuthPanelModal';
 import { ROUTES, loginPathFor, navigate, safeNextPath, useLocation } from './router';
+import { usePresenceHeartbeat } from './net/socialApi';
 
 type AuthStatus = 'checking' | 'authed' | 'anon';
 const TOKEN_KEY = 'tram_nhau_auth_token';
@@ -102,6 +103,13 @@ export default function Root() {
   }, []);
 
   const inGame = phase === 'foam_out' || phase === 'game';
+
+  // Friends see "đang ở quán" (menu) or "đang nhậu bàn #x" (match); no heartbeat = vợ thu điện thoại
+  usePresenceHeartbeat(
+    authStatus === 'authed',
+    inGame ? 'drinking' : 'online',
+    inGame ? config?.roomCode : undefined
+  );
 
   // Single source of truth for login state: lobby and match only show Logout once signed in
   const handleAuthSuccess = useCallback((session: AuthUserSession) => {

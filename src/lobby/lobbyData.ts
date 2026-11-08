@@ -1,3 +1,4 @@
+import { customNpcPlayerId, type CustomNpc } from '../../shared/social';
 import {
   CharacterAvatar,
   ClothingType,
@@ -29,8 +30,10 @@ export interface LobbySkin {
 export interface LobbyConfig {
   playerName: string;
   skin: LobbySkin;
-  /** Crew NPC ids seated at the lobby table (in seat order). */
+  /** NPC ids seated at the lobby table (in seat order) — built-in regulars or `npc_<id>` customs. */
   squadIds: string[];
+  /** Custom NPCs among squadIds (built-in regulars come from INITIAL_PLAYERS). */
+  customNpcs?: Player[];
   theme: PubTheme;
   drunkSpeed: DrunkSpeedId;
   rules: TableRules;
@@ -149,4 +152,28 @@ export function buildFriendList(crew: Player[]): LobbyFriend[] {
     { id: 'off_tuan', name: 'Tuấn Xỉn', avatar: 'duck', status: 'drinking', note: 'Đang nhậu bàn khác (Tăng 3)', invitable: false },
     { id: 'off_hung', name: 'Hùng Bia Hơi', avatar: 'dog', status: 'offline', note: 'Offline • bị vợ thu điện thoại', invitable: false },
   ];
+}
+
+/** A player-designed NPC as a table Player (generic bot: no scripted quirks). */
+export function customNpcToPlayer(npc: CustomNpc, seatIndex = 0): Player {
+  return {
+    id: customNpcPlayerId(npc.npcId),
+    name: npc.name,
+    isUser: false,
+    avatar: npc.avatar as CharacterAvatar,
+    clothing: npc.clothing as ClothingType,
+    hat: npc.hat as HatType,
+    glassType: npc.glassType as GlassType,
+    alcoholLevel: 0,
+    // Hũ chìm (tolerance 100) sits down fresher than một-lon-là-gục (0)
+    stamina: Math.round(50 + npc.tolerance / 2),
+    bladderLevel: 0,
+    seatIndex,
+    coins: 200,
+    gems: 0,
+    title: npc.catchphrase ? `"${npc.catchphrase}"` : 'NPC Tự Tạo',
+    isPassedOut: false,
+    faceDoodles: [],
+    drinksCount: 0,
+  };
 }

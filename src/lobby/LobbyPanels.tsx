@@ -681,7 +681,7 @@ export const InvitePopup: React.FC<{
           </div>
         </div>
 
-        <div className="text-xs font-black text-amber-100 mb-1.5">👥 Bạn bè</div>
+        <div className="text-xs font-black text-amber-100 mb-1.5">👥 Bạn bè & 🤖 NPC</div>
         <div className="space-y-1.5">
           {friends.map((f) => {
             const seated = seatedIds.includes(f.id);
@@ -699,7 +699,15 @@ export const InvitePopup: React.FC<{
                   onClick={() => onInvite(f.id)}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] font-black cursor-pointer disabled:cursor-not-allowed bg-amber-400 hover:bg-amber-300 text-red-900 disabled:bg-zinc-700 disabled:text-zinc-400"
                 >
-                  {seated ? 'Đã ngồi' : f.invitable ? 'Rủ!' : f.status === 'drinking' ? 'Đang nhậu' : 'Offline'}
+                  {seated
+                    ? 'Đã ngồi'
+                    : f.invitable
+                    ? 'Rủ!'
+                    : f.status === 'offline'
+                    ? '📵 Offline'
+                    : f.status === 'drinking' && f.id.startsWith('npc_off_')
+                    ? 'Đang nhậu'
+                    : 'Đã rủ ⏳'}
                 </button>
               </div>
             );

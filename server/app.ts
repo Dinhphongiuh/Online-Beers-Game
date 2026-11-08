@@ -11,6 +11,8 @@ import { playersRouter } from './routes/players.ts';
 import { receiptsRouter } from './routes/receipts.ts';
 import { commuteRouter } from './routes/commute.ts';
 import { aiRouter } from './routes/ai.ts';
+import { socialRouter } from './routes/social.ts';
+import { npcsRouter } from './routes/npcs.ts';
 
 export function createApp() {
   const app = express();
@@ -28,6 +30,8 @@ export function createApp() {
   app.use(receiptsRouter);
   app.use(commuteRouter);
   app.use(aiRouter);
+  app.use(socialRouter);
+  app.use(npcsRouter);
 
   // Database outages surface as 503 (never as fake empty data)
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {

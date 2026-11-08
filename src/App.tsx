@@ -303,8 +303,9 @@ export const INITIAL_DISHES: FoodDish[] = [
 function buildTablePlayers(config?: LobbyConfig): Player[] {
   if (!config) return INITIAL_PLAYERS;
   const user: Player = { ...INITIAL_PLAYERS[0], name: config.playerName, ...config.skin };
+  // Only the NPCs the host actually invited sit down (nobody invited = drinking alone)
   const friends = config.squadIds
-    .map((id) => INITIAL_PLAYERS.find((p) => p.id === id))
+    .map((id) => INITIAL_PLAYERS.find((p) => p.id === id) ?? config.customNpcs?.find((p) => p.id === id))
     .filter((p): p is Player => !!p);
   return [user, ...friends].map((p, i) => ({ ...p, seatIndex: i }));
 }
