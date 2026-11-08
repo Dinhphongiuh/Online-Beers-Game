@@ -44,6 +44,7 @@ import {
 } from './game/receiptLogic';
 import type { AlcoholSample, CommuteChoice, MatchReceiptInput } from '../shared/receipts';
 import { WantedSignsHUD } from './components/WantedSignsHUD';
+import { SneakHomeModal, type SneakHomeStage } from './components/SneakHomeModal';
 import { CameraAndControlsHUD } from './components/CameraAndControlsHUD';
 import { CrocodileGame } from './components/CrocodileGame';
 import { SpinBottleGame } from './components/SpinBottleGame';
@@ -313,16 +314,14 @@ export default function App({
   graphics = 'high',
   isLoggedIn = false,
   onAuthSuccess,
-  onLogout,
   onExitToMenu,
 }: {
   lobbyConfig?: LobbyConfig;
   graphics?: GraphicsQuality;
-  /** Signed in: the HUD only offers Logout instead of the login/sign-up gate. */
+  /** Signed in: the HUD hides the login/sign-up gate (logout lives on the home menu only). */
   isLoggedIn?: boolean;
   onAuthSuccess?: (session: AuthUserSession) => void;
-  onLogout?: () => void;
-  /** End of the night: leave the table and go back to the home menu. */
+  /** End of the night (or "Trốn Nhậu"): leave the table and go back to the home menu. */
   onExitToMenu?: () => void;
 } = {}) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
@@ -1069,6 +1068,33 @@ export default function App({
     }))
       .then((res) => setNightReportSaved(res.ok))
       .catch(() => setNightReportSaved(false));
+  };
+
+  // ============================================================================
+  // TRỐN NHẬU: sneak out mid-night, a Grab takes you home → back to the menu
+  // ============================================================================
+  const [sneakHomeStage, setSneakHomeStage] = useState<SneakHomeStage>('idle');
+  const handleSneakHome = () => {
+    sceneRef.current?.releasePointerLock();
+    if (userPlayer.isPassedOut || userPlayer.alcoholLevel >= 100) {
+      showToast('💤 Ngất rồi còn đòi trốn! Nằm yên đó chờ anh em tính tiền...');
+      return;
+    }
+    if (nightReport || nightEndingRef.current) {
+      showToast('🧾 Tàn tiệc rồi — xem Biên Bản Cuối Buổi rồi về Menu nhé!');
+      return;
+    }
+    sound.playUiHover();
+    setSneakHomeStage('confirm');
+  };
+  const handleConfirmSneakHome = () => {
+    setSneakHomeStage('riding');
+    setIsCommuteModalOpen(false);
+    sound.playGrabBrakeScreech();
+    window.setTimeout(() => {
+      setSneakHomeStage('idle');
+      onExitToMenu?.();
+    }, 2600);
   };
 
   // ============================================================================
@@ -5351,7 +5377,7 @@ export default function App({
               setActiveModal('drink_bladder');
             }}
             onOpenAuth={isLoggedIn ? undefined : () => setActiveModal('auth')}
-            onLogout={isLoggedIn ? onLogout : undefined}
+            onSneakHome={handleSneakHome}
           />
 
           {/* Urgent Living Chaos Event Banner (Rain Tarp QTE, Urban Patrol, or Wife Call Stealth) */}
@@ -5467,6 +5493,13 @@ export default function App({
             isSpicedMouth={userPlayer.isSpicedMouth}
             spotlightVictimName={spotlightVictimName}
             cheatingAlertText={cheatingAlertText}
+          />
+
+          <SneakHomeModal
+            stage={sneakHomeStage}
+            alcoholLevel={userPlayer.alcoholLevel}
+            onCancel={() => setSneakHomeStage('idle')}
+            onConfirm={handleConfirmSneakHome}
           />
 
           {nightReport && (

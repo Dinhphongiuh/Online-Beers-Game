@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, TableState } from '../game/types';
-import { Volume2, VolumeX, Users, Flame, Zap, Droplets, Database, LogOut } from 'lucide-react';
+import { Volume2, VolumeX, Users, Flame, Zap, Droplets, Database } from 'lucide-react';
 
 interface TopBarProps {
   userPlayer: Player;
@@ -11,8 +11,8 @@ interface TopBarProps {
   onOpenShop: () => void;
   onOpenDrinkModal?: () => void;
   onOpenAuth?: () => void;
-  /** Shown instead of the auth shortcut once the player is signed in */
-  onLogout?: () => void;
+  /** "Trốn Nhậu": sneak out mid-night, Grab home, back to the menu (no logout in a match). */
+  onSneakHome?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -24,7 +24,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenShop,
   onOpenDrinkModal,
   onOpenAuth,
-  onLogout,
+  onSneakHome,
 }) => {
   const alcohol = userPlayer.alcoholLevel;
   const stamina = userPlayer.stamina;
@@ -92,14 +92,15 @@ export const TopBar: React.FC<TopBarProps> = ({
             <span className="text-[10px] font-bold text-amber-200 hidden sm:inline">Hộ Chiếu</span>
           </button>
         )}
-        {onLogout && (
+        {onSneakHome && (
           <button
-            onClick={onLogout}
-            title="Đăng xuất — rời bàn, rút êm về nhà trước khi nóc nhà gọi"
-            className="bg-rose-600/20 hover:bg-rose-600 border border-rose-500/50 rounded-xl px-2.5 py-1.5 text-xs text-rose-200 hover:text-white flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
+            data-testid="sneak-home-btn"
+            onClick={onSneakHome}
+            title="Trốn nhậu — lẻn ra cửa sau gọi Grab về nhà (về Menu)"
+            className="bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/50 rounded-xl px-2.5 py-1.5 text-xs text-emerald-200 hover:text-white flex items-center gap-1.5 shadow-lg transition-all active:scale-95"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-bold hidden sm:inline">Rút Êm Về Nhà 🏃</span>
+            <span className="text-sm">🚕</span>
+            <span className="text-[10px] font-bold hidden sm:inline">Trốn Nhậu</span>
           </button>
         )}
       </div>

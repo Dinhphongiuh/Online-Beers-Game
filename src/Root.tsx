@@ -4,6 +4,10 @@ import { MainMenu } from './lobby/MainMenu';
 import { LobbyConfig } from './lobby/lobbyData';
 import { GraphicsQuality } from './lobby/LobbyPanels';
 import { AuthPanelModal, AuthUserSession } from './components/AuthPanelModal';
+import { ROUTES, loginPathFor, navigate, safeNextPath, useLocation } from './router';
+
+type AuthStatus = 'checking' | 'authed' | 'anon';
+const TOKEN_KEY = 'tram_nhau_auth_token';
 
 type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 
@@ -41,32 +45,52 @@ export default function Root() {
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [userSession, setUserSession] = useState<AuthUserSession | null>(null);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(() =>
+    localStorage.getItem(TOKEN_KEY) ? 'checking' : 'anon'
+  );
+  const location = useLocation();
+  const onLoginRoute = location.path === ROUTES.login;
 
   // Authenticate session from Redis on mount using stored token
   useEffect(() => {
-    const token = localStorage.getItem('tram_nhau_auth_token');
+    const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return;
 
     fetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.authenticated && data?.user) {
-          setUserSession({
-            authMode: data.user.isGuest ? 'GUEST' : 'LOGIN',
-            username: data.user.username,
-            email: data.user.email,
-            avatar: data.user.avatar || 'dog',
-            drunkArchetype: data.user.drunkArchetype || 'TRIET_GIA',
-            declaredTolerance: data.user.declaredTolerance || 50,
-            coins: data.user.coins || 740,
-            title: data.user.title || 'Khách Quen Bờ Kè',
-          });
+      .then(async (res) => ({ status: res.status, data: res.ok ? await res.json() : null }))
+      .then(({ status, data }) => {
+        if (!data?.authenticated || !data?.user) {
+          // 401 = expired / revoked: forget the token. A server hiccup (5xx) keeps it.
+          if (status === 401) localStorage.removeItem(TOKEN_KEY);
+          setAuthStatus('anon');
+          return;
         }
+        setUserSession({
+          authMode: data.user.isGuest ? 'GUEST' : 'LOGIN',
+          username: data.user.username,
+          email: data.user.email,
+          avatar: data.user.avatar || 'dog',
+          drunkArchetype: data.user.drunkArchetype || 'TRIET_GIA',
+          declaredTolerance: data.user.declaredTolerance || 50,
+          coins: data.user.coins || 740,
+          title: data.user.title || 'Khách Quen Bờ Kè',
+        });
+        setAuthStatus('authed');
       })
-      .catch(() => null);
+      .catch(() => setAuthStatus('anon'));
   }, []);
+
+  // Route guard: the menu (and the match) need a session; /login is only for signed-out players
+  useEffect(() => {
+    if (authStatus === 'checking') return;
+    if (authStatus === 'anon' && !onLoginRoute) {
+      navigate(loginPathFor(location.path, location.search), { replace: true });
+    } else if (authStatus === 'authed' && onLoginRoute) {
+      navigate(safeNextPath(location.search), { replace: true });
+    }
+  }, [authStatus, onLoginRoute, location.path, location.search]);
 
   const handleStart = useCallback((cfg: LobbyConfig, gfx: GraphicsQuality) => {
     setConfig(cfg);
@@ -83,15 +107,18 @@ export default function Root() {
   const handleAuthSuccess = useCallback((session: AuthUserSession) => {
     setUserSession(session);
     setShowAuthGate(false);
+    setAuthStatus('authed'); // the guard sends /login → ?next (or the menu)
   }, []);
 
   const handleLogout = useCallback(async () => {
-    const token = localStorage.getItem('tram_nhau_auth_token');
-    localStorage.removeItem('tram_nhau_auth_token');
+    const token = localStorage.getItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
     setUserSession(null);
-    // Leaving the account also leaves the table
+    // Leaving the account also leaves the table, and lands back at the gate
     setPhase('menu');
     setConfig(null);
+    setAuthStatus('anon');
+    navigate(ROUTES.login, { replace: true });
     if (token) {
       await fetch('/api/auth/logout', {
         method: 'POST',
@@ -111,6 +138,21 @@ export default function Root() {
     };
   }, [userSession]);
 
+  // ---- /login: Cổng Quán (no close button — it's the way in) ----
+  if (onLoginRoute) {
+    if (authStatus === 'authed') return null; // redirecting to ?next
+    return <AuthPanelModal isOpen={true} onSuccess={handleAuthSuccess} />;
+  }
+
+  // ---- Protected: wait for the session check, then menu / match ----
+  if (authStatus !== 'authed') {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-zinc-950 text-amber-300 font-neon text-xl">
+        {authStatus === 'checking' ? '🪪 Đang kiểm tra Hộ Chiếu...' : '🚪 Mời qua Cổng Quán...'}
+      </div>
+    );
+  }
+
   return (
     <>
       {inGame && config ? (
@@ -119,7 +161,6 @@ export default function Root() {
           graphics={graphics}
           isLoggedIn={!!userSession}
           onAuthSuccess={handleAuthSuccess}
-          onLogout={handleLogout}
           onExitToMenu={() => {
             // Drop the `?autostart=1` dev shortcut: a later reload (F5 / Vite) must stay on the menu
             const url = new URL(window.location.href);
