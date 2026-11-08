@@ -34,7 +34,8 @@ import { AuthPanelModal, AuthUserSession } from '../components/AuthPanelModal';
 import { FriendsPanel, type NpcEntry } from './FriendsPanel';
 import { NpcCreatorModal } from './NpcCreatorModal';
 import { socialApi, useCustomNpcs, useSocial } from '../net/socialApi';
-import { presenceNote, type CustomNpc } from '../../shared/social';
+import { useSocialEvents } from '../net/socialSocket';
+import { presenceNote, socialEventToast, type CustomNpc } from '../../shared/social';
 
 /** Notes for the built-in regulars in the NPC tab. */
 const BUILTIN_NPC_NOTES: Record<string, string> = {
@@ -178,7 +179,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [mobileSheet, setMobileSheet] = useState<'none' | 'chat' | 'friends'>('none');
 
   // ---- Friends (real accounts) & NPCs (regulars + player-made) ----
-  const { snapshot: social, error: socialError, refresh: refreshSocial } = useSocial(isLoggedIn);
+  const { snapshot: social, error: socialError, refresh: refreshSocial, live: socialLive } = useSocial(isLoggedIn);
   const customNpcs = useCustomNpcs(isLoggedIn);
   const [npcCreatorOpen, setNpcCreatorOpen] = useState(false);
   const [invitedFriendIds, setInvitedFriendIds] = useState<string[]>([]);
@@ -223,6 +224,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     },
     [later]
   );
+
+  // Realtime friends events → toast + a little sound
+  useSocialEvents((e) => {
+    const text = socialEventToast(e);
+    if (!text) return;
+    if (e.type === 'table_invite') sound.playHornBeep();
+    else sound.playBottleOpen();
+    showToast(text);
+  });
 
   const say = useCallback((who: string, text: string) => {
     setChat((prev) => [...prev.slice(-30), { key: nextKey(), who, text }]);
@@ -693,6 +703,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     <FriendsPanel
       social={social}
       socialError={socialError}
+      live={socialLive}
       npcs={npcEntries}
       seatedNpcIds={squad.map((m) => m.id)}
       invitedFriendIds={invitedFriendIds}

@@ -18,6 +18,8 @@ export interface NpcEntry {
 interface FriendsPanelProps {
   social: SocialSnapshot | null;
   socialError: string | null;
+  /** Realtime socket connected (else we're on the slower poll). */
+  live?: boolean;
   npcs: NpcEntry[];
   /** NPC ids already on a stool. */
   seatedNpcIds: string[];
@@ -47,6 +49,7 @@ const DOT: Record<string, string> = {
 export const FriendsPanel: React.FC<FriendsPanelProps> = ({
   social,
   socialError,
+  live,
   npcs,
   seatedNpcIds,
   invitedFriendIds,
@@ -114,11 +117,15 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
 
       {tab === 'friends' ? (
         <div className="space-y-1.5">
+          <div data-testid="social-live" className="flex items-center justify-end gap-1 text-[9px] font-bold text-zinc-500 -mt-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
+            {live ? 'Realtime' : 'Đang kết nối lại…'}
+          </div>
           <form onSubmit={submitAdd} className="flex gap-1">
             <input
               value={addName}
               onChange={(e) => setAddName(e.target.value)}
-              placeholder="Kết bạn bằng biệt danh…"
+              placeholder="Kết bạn bằng biệt danh hoặc ID…"
               data-testid="add-friend-input"
               className="flex-1 min-w-0 bg-zinc-900 text-white text-[11px] px-2 py-1 rounded-lg border border-zinc-800 focus:outline-none focus:border-amber-400"
             />
@@ -161,7 +168,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
             {socialError && !social && <div className="text-[10px] text-red-300 px-1">⚠️ {socialError}</div>}
             {social && friends.length === 0 && (
               <div className="text-[10px] text-zinc-500 px-1 py-2 text-center">
-                Chưa có bạn nhậu nào — gõ biệt danh ở trên để kết bạn!
+                Chưa có bạn nhậu nào — gõ biệt danh hoặc Mã hộ chiếu ở trên để kết bạn!
               </div>
             )}
             {friends.map((f) => {

@@ -119,3 +119,32 @@ export function sanitizeNpcInput(raw: unknown): Omit<CustomNpc, 'npcId'> | null 
 
 /** Lobby/table id for a custom NPC (never collides with the built-in `bot_*` regulars). */
 export const customNpcPlayerId = (npcId: string) => `npc_${npcId}`;
+
+// ---------------------------------------------------------------------------
+// Realtime push (Colyseus room "social_hub"): the server tells you right away instead of
+// waiting for the next poll.
+// ---------------------------------------------------------------------------
+
+export const SOCIAL_ROOM_NAME = 'social_hub';
+export const SOCIAL_EVENT_MSG = 'social';
+
+export type SocialEvent =
+  | { type: 'friend_request'; from: SocialUser }
+  | { type: 'friend_accepted'; by: SocialUser }
+  | { type: 'friend_removed'; userId: string }
+  | { type: 'table_invite'; invite: TableInvite }
+  | { type: 'presence'; userId: string; presence: Presence };
+
+/** One line for a toast, or null when the event is silent (presence ticks). */
+export function socialEventToast(e: SocialEvent): string | null {
+  switch (e.type) {
+    case 'friend_request':
+      return `📨 ${e.from.username} muốn kết bạn nhậu với bạn!`;
+    case 'friend_accepted':
+      return `🤝 ${e.by.username} đã đồng ý kết bạn — giờ là bạn nhậu!`;
+    case 'table_invite':
+      return `🍻 ${e.invite.fromName} rủ bạn vào bàn #${e.invite.roomCode}!`;
+    default:
+      return null;
+  }
+}

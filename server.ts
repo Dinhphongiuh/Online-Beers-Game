@@ -10,6 +10,8 @@ import { createApp } from './server/app.ts';
 import { initMongo } from './server/db/index.ts';
 import { TableRoom } from './server/tableRoom.ts';
 import { TABLE_ROOM_NAME } from './shared/tableNet.ts';
+import { SocialRoom } from './server/realtime/socialRoom.ts';
+import { SOCIAL_ROOM_NAME } from './shared/social.ts';
 
 /**
  * Entry point: REST API (server/app.ts) + Vite/static frontend + Colyseus realtime tables,
@@ -49,6 +51,8 @@ async function startServer() {
     greet: false,
   });
   gameServer.define(TABLE_ROOM_NAME, TableRoom).filterBy(['roomCode']);
+  // Friends list push channel (friend requests, table invites, presence)
+  gameServer.define(SOCIAL_ROOM_NAME, SocialRoom);
 
   await gameServer.listen(Number(port), '0.0.0.0');
   console.log(`Server listening on http://0.0.0.0:${port} (Colyseus room "${TABLE_ROOM_NAME}")`);

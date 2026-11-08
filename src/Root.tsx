@@ -6,6 +6,8 @@ import { GraphicsQuality } from './lobby/LobbyPanels';
 import { AuthPanelModal, AuthUserSession } from './components/AuthPanelModal';
 import { ROUTES, loginPathFor, navigate, safeNextPath, useLocation } from './router';
 import { usePresenceHeartbeat } from './net/socialApi';
+import { useSocialEvents, useSocialSocket } from './net/socialSocket';
+import { socialEventToast } from '../shared/social';
 
 type AuthStatus = 'checking' | 'authed' | 'anon';
 const TOKEN_KEY = 'tram_nhau_auth_token';
@@ -104,6 +106,18 @@ export default function Root() {
 
   const inGame = phase === 'foam_out' || phase === 'game';
 
+  // Realtime friends channel (friend requests, table invites, presence) while signed in
+  useSocialSocket(authStatus === 'authed');
+  const [socialToast, setSocialToast] = useState<string | null>(null);
+  useSocialEvents((e) => {
+    // The menu shows its own toasts; mid-match a small banner keeps you in the loop
+    if (!inGame) return;
+    const text = socialEventToast(e);
+    if (!text) return;
+    setSocialToast(text);
+    window.setTimeout(() => setSocialToast((t) => (t === text ? null : t)), 5000);
+  });
+
   // Friends see "đang ở quán" (menu) or "đang nhậu bàn #x" (match); no heartbeat = vợ thu điện thoại
   usePresenceHeartbeat(
     authStatus === 'authed',
@@ -189,6 +203,16 @@ export default function Root() {
           onAuthSuccess={handleAuthSuccess}
           onLogout={handleLogout}
         />
+      )}
+
+      {inGame && socialToast && (
+        <div
+          data-testid="social-toast-ingame"
+          className="fixed top-20 right-4 z-[96] max-w-xs rounded-xl border-2 border-amber-400 bg-zinc-950/95 px-3 py-2 text-xs font-bold text-amber-100 shadow-2xl pointer-events-none"
+        >
+          {socialToast}
+          <div className="text-[10px] font-normal text-zinc-400">Xem ở danh sách bạn bè khi về Menu</div>
+        </div>
       )}
 
       {showAuthGate && (

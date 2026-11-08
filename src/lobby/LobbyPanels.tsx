@@ -18,6 +18,7 @@ import {
   drinkingRank,
 } from './lobbyData';
 import { HangoverBook } from '../components/HangoverBook';
+import { PassportCard } from './PassportCard';
 import { getNetPlayerId } from '../net/useTableNet';
 import type { MatchReceipt } from '../../shared/receipts';
 
@@ -407,7 +408,7 @@ export const ProfilePanel: React.FC<{
 
   return (
     <ModalBackdrop onClose={onClose}>
-      <div className="relative w-[min(440px,95vw)] max-h-[90vh] overflow-y-auto rounded-2xl bg-gradient-to-b from-emerald-900 to-emerald-950 border-4 border-amber-500/80 shadow-2xl text-white">
+      <div className="relative w-[min(480px,95vw)] max-h-[92vh] overflow-y-auto rounded-2xl bg-gradient-to-b from-emerald-900 to-emerald-950 border-4 border-amber-500/80 shadow-2xl text-white">
         <CloseButton onClose={onClose} />
         <div className="px-5 pt-5 pb-3 text-center border-b border-amber-500/30">
           <div className="text-[10px] tracking-[0.35em] text-amber-300/80">CỘNG HÒA BÀN NHẬU VỈA HÈ</div>
@@ -435,30 +436,19 @@ export const ProfilePanel: React.FC<{
 
         <div className="p-4 pt-2">
           {tab === 'passport' && (
-            <div className="flex gap-4 items-start">
-              {passport?.pinned ? (
-                <div className="w-28 shrink-0 bg-white p-1.5 pb-6 shadow-lg rotate-[-4deg] relative" title="Ảnh ghim trang nhất">
-                  <img src={passport.pinned.funnySnapshot} alt="" className="w-full aspect-[4/3] object-cover sepia-[25%]" />
-                  <div className="absolute bottom-1 left-1.5 right-1.5 text-[8px] leading-tight text-zinc-700 line-clamp-2">
-                    {passport.pinned.funnySnapshotCaption}
-                  </div>
-                </div>
-              ) : (
-                <div className="w-24 h-28 shrink-0 rounded-lg bg-amber-100 border-2 border-amber-600 flex items-center justify-center text-6xl">
-                  {AVATAR_ICON[avatar]}
-                </div>
-              )}
-              <div className="text-sm space-y-1.5">
-                <div><span className="text-white/50 text-[11px]">Họ tên:</span> <b>{name}</b></div>
-                <div><span className="text-white/50 text-[11px]">Cấp tửu lượng:</span> <b className="text-amber-300">Lv.{rank.level} {rank.name}</b></div>
-                <div><span className="text-white/50 text-[11px]">Số lần hô Dzô:</span> <b>{toastCount}</b></div>
-                <div><span className="text-white/50 text-[11px]">Nắp bia tích lũy:</span> <b>{coins} 🪙</b></div>
-                <div><span className="text-white/50 text-[11px]">Lần trốn bill thành công:</span> <b>{passport ? `${passport.escaped}/${passport.nights} buổi` : '—'}</b></div>
-                <div className="inline-block mt-1 px-2 py-0.5 rounded border-2 border-red-500 text-red-400 text-[10px] font-black rotate-[-4deg]">
-                  ĐÃ ĐÓNG DẤU KIỂM ĐỊNH ĐỘ LẦY
-                </div>
-              </div>
-            </div>
+            <PassportCard
+              name={name}
+              avatar={avatar}
+              coins={coins}
+              toastCount={toastCount}
+              escaped={passport?.escaped ?? null}
+              nights={passport?.nights ?? null}
+              pinnedPhoto={
+                passport?.pinned
+                  ? { src: passport.pinned.funnySnapshot, caption: passport.pinned.funnySnapshotCaption }
+                  : null
+              }
+            />
           )}
 
           {tab === 'rank' && (

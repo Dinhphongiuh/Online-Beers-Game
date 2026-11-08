@@ -3,6 +3,7 @@
  * presence heartbeats and the player's custom NPCs.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSocialEvents, useSocialLive } from './socialSocket';
 import {
   PRESENCE_HEARTBEAT_MS,
   type CustomNpc,
@@ -10,7 +11,9 @@ import {
 } from '../../shared/social';
 
 const TOKEN_KEY = 'tram_nhau_auth_token';
-const SOCIAL_POLL_MS = 6000;
+/** Fallback poll: slow while the realtime socket is up, quicker when it is down. */
+const SOCIAL_POLL_LIVE_MS = 30_000;
+const SOCIAL_POLL_OFFLINE_MS = 6000;
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -79,18 +82,27 @@ export function useSocial(enabled = true) {
     }
   }, []);
 
+  const live = useSocialLive();
   useEffect(() => {
     alive.current = true;
     if (!enabled) return;
     void refresh();
-    const id = window.setInterval(refresh, SOCIAL_POLL_MS);
+    const id = window.setInterval(refresh, live ? SOCIAL_POLL_LIVE_MS : SOCIAL_POLL_OFFLINE_MS);
     return () => {
       alive.current = false;
       clearInterval(id);
     };
-  }, [enabled, refresh]);
+  }, [enabled, refresh, live]);
 
-  return { snapshot, error, refresh };
+  // Pushed event → refetch right away (coalesce bursts, e.g. several friends' presence)
+  const pending = useRef(0);
+  useSocialEvents(() => {
+    if (!enabled) return;
+    clearTimeout(pending.current);
+    pending.current = window.setTimeout(() => void refresh(), 150);
+  });
+
+  return { snapshot, error, refresh, live };
 }
 
 /** "Đang ở quán" in the menu, "đang nhậu bàn #x" in a match; silence = offline after the TTL. */

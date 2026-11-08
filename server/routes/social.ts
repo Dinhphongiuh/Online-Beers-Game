@@ -8,28 +8,24 @@ import { dbService } from '../db/index.ts';
 import { redis } from '../redis.ts';
 import { sendServerError } from '../http/respond.ts';
 import { parseRedisJson, requireSession, type SessionUser } from '../http/session.ts';
+import { socialHub } from '../realtime/socialHub.ts';
+import { readPresence, setPresence } from '../services/presence.ts';
 import {
   INVITE_TTL_SECONDS,
-  PRESENCE_TTL_SECONDS,
   sanitizePresenceInput,
   sortFriends,
   type FriendView,
-  type Presence,
   type SocialSnapshot,
+  type SocialUser,
   type TableInvite,
 } from '../../shared/social.ts';
 
 export const socialRouter = Router();
 socialRouter.use('/api/social', requireSession);
 
-const presenceKey = (userId: string) => `presence:${userId}`;
 const invitesKey = (userId: string) => `invites:${userId}`;
 const me = (res: { locals: Record<string, unknown> }) => res.locals.user as SessionUser;
-
-async function readPresence(userId: string): Promise<Presence> {
-  const p = parseRedisJson<Presence>(await redis.get(presenceKey(userId)));
-  return p && (p.state === 'online' || p.state === 'drinking') ? p : { state: 'offline' };
-}
+const publicProfile = (u: SessionUser): SocialUser => ({ userId: u.userId, username: u.username, avatar: u.avatar });
 
 async function readInvites(userId: string): Promise<TableInvite[]> {
   const list = parseRedisJson<TableInvite[]>(await redis.get(invitesKey(userId))) ?? [];
@@ -65,8 +61,7 @@ socialRouter.get('/api/social', async (_req, res) => {
 // POST heartbeat: "đang ở quán" (menu) or "đang nhậu bàn #1234"
 socialRouter.post('/api/social/presence', async (req, res) => {
   try {
-    const presence = { ...sanitizePresenceInput(req.body), updatedAt: Date.now() };
-    await redis.set(presenceKey(me(res).userId), JSON.stringify(presence), 'EX', PRESENCE_TTL_SECONDS);
+    const presence = await setPresence(me(res).userId, sanitizePresenceInput(req.body));
     res.json({ success: true, presence });
   } catch (error) {
     sendServerError(res, error, 'Không cập nhật được trạng thái');
@@ -83,6 +78,9 @@ socialRouter.post('/api/social/friends/request', async (req, res) => {
     if (!target || target.userId === undefined) return res.status(404).json({ error: `Không có bợm nhậu nào tên "${name}"` });
     if (target.userId === user.userId) return res.status(400).json({ error: 'Tự kết bạn với chính mình thì hơi cô đơn 🥲' });
     const result = await dbService.requestFriend(user.userId, target.userId);
+    // Realtime: the other side sees the request (or the auto-accept) without waiting for a poll
+    if (result === 'sent') socialHub.notify(target.userId, { type: 'friend_request', from: publicProfile(user) });
+    if (result === 'accepted') socialHub.notify(target.userId, { type: 'friend_accepted', by: publicProfile(user) });
     const messages = {
       sent: `📨 Đã gửi lời mời kết bạn tới ${target.username}`,
       accepted: `🤝 ${target.username} cũng đã mời bạn — giờ là bạn nhậu!`,
@@ -97,8 +95,11 @@ socialRouter.post('/api/social/friends/request', async (req, res) => {
 
 socialRouter.post('/api/social/friends/:userId/accept', async (req, res) => {
   try {
-    const ok = await dbService.acceptFriend(me(res).userId, String(req.params.userId));
+    const user = me(res);
+    const otherId = String(req.params.userId);
+    const ok = await dbService.acceptFriend(user.userId, otherId);
     if (!ok) return res.status(404).json({ error: 'Lời mời không còn nữa' });
+    socialHub.notify(otherId, { type: 'friend_accepted', by: publicProfile(user) });
     res.json({ success: true });
   } catch (error) {
     sendServerError(res, error, 'Không chấp nhận được lời mời');
@@ -108,7 +109,11 @@ socialRouter.post('/api/social/friends/:userId/accept', async (req, res) => {
 // DELETE = từ chối / hủy lời mời / hủy kết bạn
 socialRouter.delete('/api/social/friends/:userId', async (req, res) => {
   try {
-    await dbService.removeFriend(me(res).userId, String(req.params.userId));
+    const user = me(res);
+    const otherId = String(req.params.userId);
+    if (await dbService.removeFriend(user.userId, otherId)) {
+      socialHub.notify(otherId, { type: 'friend_removed', userId: user.userId });
+    }
     res.json({ success: true });
   } catch (error) {
     sendServerError(res, error, 'Không xóa được');
@@ -137,6 +142,7 @@ socialRouter.post('/api/social/friends/:userId/invite', async (req, res) => {
       at: Date.now(),
     };
     await writeInvites(targetId, [...list, invite]);
+    socialHub.notify(targetId, { type: 'table_invite', invite });
     res.json({ success: true, invite });
   } catch (error) {
     sendServerError(res, error, 'Không rủ được');
