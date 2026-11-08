@@ -34,6 +34,7 @@ import { AuthPanelModal, AuthUserSession } from '../components/AuthPanelModal';
 import { FriendsPanel, type NpcEntry } from './FriendsPanel';
 import { NpcCreatorModal } from './NpcCreatorModal';
 import { FriendProfileModal } from './FriendProfileModal';
+import { UnfriendConfirmModal, type UnfriendTarget } from './UnfriendConfirmModal';
 import { socialApi, useCustomNpcs, useSocial } from '../net/socialApi';
 import { useSocialEvents } from '../net/socialSocket';
 import { presenceNote, socialEventToast, type CustomNpc } from '../../shared/social';
@@ -184,6 +185,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const customNpcs = useCustomNpcs(isLoggedIn);
   const [npcCreatorOpen, setNpcCreatorOpen] = useState(false);
   const [viewFriendId, setViewFriendId] = useState<string | null>(null);
+  const [unfriendTarget, setUnfriendTarget] = useState<UnfriendTarget | null>(null);
   const [invitedFriendIds, setInvitedFriendIds] = useState<string[]>([]);
   const customPlayers = useMemo(() => customNpcs.npcs.map((n) => customNpcToPlayer(n)), [customNpcs.npcs]);
   const allNpcs = useMemo(() => [...crew, ...customPlayers], [crew, customPlayers]);
@@ -548,6 +550,17 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     }
     void refreshSocial();
   };
+  const handleConfirmUnfriend = async (target: UnfriendTarget) => {
+    setUnfriendTarget(null);
+    setViewFriendId((id) => (id === target.userId ? null : id));
+    try {
+      await socialApi.remove(target.userId);
+      showToast(`💔 Đã xé tình bạn với ${target.username}. Từ nay tự trả tiền bia nhé!`);
+    } catch (err) {
+      showToast(`⚠️ ${err instanceof Error ? err.message : 'Lỗi'}`);
+    }
+    void refreshSocial();
+  };
   const handleDeleteNpc = async (npc: CustomNpc) => {
     try {
       await customNpcs.remove(npc.npcId);
@@ -718,6 +731,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       onSendFriendRequest={handleSendFriendRequest}
       onAcceptFriend={handleAcceptFriend}
       onRemoveFriend={handleRemoveFriend}
+      onUnfriend={setUnfriendTarget}
       onOpenFriend={(id) => setViewFriendId(id)}
     />
   );
@@ -1148,11 +1162,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           roomCode={roomCode}
           invited={invitedFriendIds.includes(viewFriendId)}
           onInvite={(id, username) => void handleInviteFriend(id, username)}
-          onUnfriend={(id) => {
-            void handleRemoveFriend(id);
-            setViewFriendId(null);
-          }}
+          onUnfriend={setUnfriendTarget}
           onClose={() => setViewFriendId(null)}
+        />
+      )}
+      {unfriendTarget && (
+        <UnfriendConfirmModal
+          target={unfriendTarget}
+          onConfirm={(t) => void handleConfirmUnfriend(t)}
+          onCancel={() => setUnfriendTarget(null)}
         />
       )}
 

@@ -4,7 +4,7 @@ import { sound } from '../game/audio';
 import type { Player } from '../game/types';
 import { AVATAR_ICON } from './lobbyData';
 import { sfx } from './LobbyPanels';
-import { presenceNote, type CustomNpc, type SocialSnapshot } from '../../shared/social';
+import { presenceNote, type CustomNpc, type SocialSnapshot, type SocialUser } from '../../shared/social';
 
 export interface NpcEntry {
   player: Player;
@@ -33,7 +33,10 @@ interface FriendsPanelProps {
   onInviteFriend: (userId: string, username: string) => void;
   onSendFriendRequest: (username: string) => Promise<string>;
   onAcceptFriend: (userId: string) => void;
+  /** Decline an incoming request / cancel my outgoing one. */
   onRemoveFriend: (userId: string) => void;
+  /** Unfriend an accepted friend (parent shows the confirm). */
+  onUnfriend: (friend: SocialUser) => void;
   /** Tap a friend → their passport. */
   onOpenFriend: (userId: string) => void;
 }
@@ -64,6 +67,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
   onSendFriendRequest,
   onAcceptFriend,
   onRemoveFriend,
+  onUnfriend,
   onOpenFriend,
 }) => {
   const [tab, setTab] = useState<'friends' | 'npc'>('friends');
@@ -199,7 +203,8 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
                     </span>
                   </button>
                   <button
-                    onClick={() => onRemoveFriend(f.userId)}
+                    data-testid="friend-unfriend"
+                    onClick={() => onUnfriend(f)}
                     title="Hủy kết bạn"
                     className="hidden group-hover:block text-zinc-600 hover:text-red-400 cursor-pointer"
                   >

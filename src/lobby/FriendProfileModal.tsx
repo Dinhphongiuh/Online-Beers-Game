@@ -18,12 +18,12 @@ export const FriendProfileModal: React.FC<{
   roomCode: string;
   invited: boolean;
   onInvite: (userId: string, username: string) => void;
-  onUnfriend: (userId: string) => void;
+  /** Parent shows the unfriend confirm. */
+  onUnfriend: (friend: { userId: string; username: string; avatar: string }) => void;
   onClose: () => void;
 }> = ({ userId, roomCode, invited, onInvite, onUnfriend, onClose }) => {
   const [profile, setProfile] = useState<FriendProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmUnfriend, setConfirmUnfriend] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -134,12 +134,11 @@ export const FriendProfileModal: React.FC<{
                   </button>
                 )}
                 <button
-                  onClick={() => (confirmUnfriend ? onUnfriend(profile.userId) : setConfirmUnfriend(true))}
-                  className={`rounded-xl py-2.5 text-sm font-black cursor-pointer ${
-                    confirmUnfriend ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
-                  }`}
+                  data-testid="friend-profile-unfriend"
+                  onClick={() => onUnfriend({ userId: profile.userId, username: profile.username, avatar: profile.avatar })}
+                  className="rounded-xl py-2.5 text-sm font-black cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
                 >
-                  {confirmUnfriend ? 'Chắc chưa? Hủy luôn!' : '💔 Hủy kết bạn'}
+                  💔 Hủy kết bạn
                 </button>
               </div>
             </>
