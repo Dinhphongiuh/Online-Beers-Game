@@ -34,6 +34,8 @@ interface FriendsPanelProps {
   onSendFriendRequest: (username: string) => Promise<string>;
   onAcceptFriend: (userId: string) => void;
   onRemoveFriend: (userId: string) => void;
+  /** Tap a friend → their passport. */
+  onOpenFriend: (userId: string) => void;
 }
 
 const DOT: Record<string, string> = {
@@ -62,6 +64,7 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
   onSendFriendRequest,
   onAcceptFriend,
   onRemoveFriend,
+  onOpenFriend,
 }) => {
   const [tab, setTab] = useState<'friends' | 'npc'>('friends');
   const [addName, setAddName] = useState('');
@@ -176,14 +179,25 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
               const atMyTable = f.presence.state === 'drinking' && f.presence.roomCode === roomCode;
               return (
                 <div key={f.userId} data-testid="friend-row" className="group flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-white/5">
-                  <span className="relative text-lg leading-none">
-                    {AVATAR_ICON[f.avatar as Player['avatar']] ?? '🍺'}
-                    <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-950 ${DOT[f.presence.state]}`} />
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-[12px] font-bold text-zinc-100 truncate">{f.username}</span>
-                    <span className="block text-[9px] text-zinc-500 truncate">{presenceNote(f.presence)}</span>
-                  </span>
+                  <button
+                    type="button"
+                    {...sfx}
+                    data-testid="friend-open-profile"
+                    onClick={() => onOpenFriend(f.userId)}
+                    title={`Xem hộ chiếu của ${f.username}`}
+                    className="flex flex-1 min-w-0 items-center gap-2 text-left cursor-pointer"
+                  >
+                    <span className="relative text-lg leading-none">
+                      {AVATAR_ICON[f.avatar as Player['avatar']] ?? '🍺'}
+                      <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-950 ${DOT[f.presence.state]}`} />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[12px] font-bold text-zinc-100 truncate group-hover:text-amber-300 group-hover:underline">
+                        {f.username}
+                      </span>
+                      <span className="block text-[9px] text-zinc-500 truncate">{presenceNote(f.presence)}</span>
+                    </span>
+                  </button>
                   <button
                     onClick={() => onRemoveFriend(f.userId)}
                     title="Hủy kết bạn"

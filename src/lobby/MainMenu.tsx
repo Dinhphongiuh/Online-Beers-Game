@@ -33,6 +33,7 @@ import {
 import { AuthPanelModal, AuthUserSession } from '../components/AuthPanelModal';
 import { FriendsPanel, type NpcEntry } from './FriendsPanel';
 import { NpcCreatorModal } from './NpcCreatorModal';
+import { FriendProfileModal } from './FriendProfileModal';
 import { socialApi, useCustomNpcs, useSocial } from '../net/socialApi';
 import { useSocialEvents } from '../net/socialSocket';
 import { presenceNote, socialEventToast, type CustomNpc } from '../../shared/social';
@@ -182,6 +183,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const { snapshot: social, error: socialError, refresh: refreshSocial, live: socialLive } = useSocial(isLoggedIn);
   const customNpcs = useCustomNpcs(isLoggedIn);
   const [npcCreatorOpen, setNpcCreatorOpen] = useState(false);
+  const [viewFriendId, setViewFriendId] = useState<string | null>(null);
   const [invitedFriendIds, setInvitedFriendIds] = useState<string[]>([]);
   const customPlayers = useMemo(() => customNpcs.npcs.map((n) => customNpcToPlayer(n)), [customNpcs.npcs]);
   const allNpcs = useMemo(() => [...crew, ...customPlayers], [crew, customPlayers]);
@@ -716,6 +718,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       onSendFriendRequest={handleSendFriendRequest}
       onAcceptFriend={handleAcceptFriend}
       onRemoveFriend={handleRemoveFriend}
+      onOpenFriend={(id) => setViewFriendId(id)}
     />
   );
 
@@ -1139,6 +1142,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           onClose={() => setPanel('none')}
         />
       )}
+      {viewFriendId && (
+        <FriendProfileModal
+          userId={viewFriendId}
+          roomCode={roomCode}
+          invited={invitedFriendIds.includes(viewFriendId)}
+          onInvite={(id, username) => void handleInviteFriend(id, username)}
+          onUnfriend={(id) => {
+            void handleRemoveFriend(id);
+            setViewFriendId(null);
+          }}
+          onClose={() => setViewFriendId(null)}
+        />
+      )}
+
       {npcCreatorOpen && (
         <NpcCreatorModal
           count={customNpcs.npcs.length}

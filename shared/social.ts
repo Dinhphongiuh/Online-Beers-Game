@@ -148,3 +148,20 @@ export function socialEventToast(e: SocialEvent): string | null {
       return null;
   }
 }
+
+/** A friend's passport as shown when you tap them in the friends list. */
+export interface FriendProfile extends SocialUser {
+  isGuest: boolean;
+  createdAt?: string;
+  drunkArchetype?: string;
+  presence: Presence;
+  coins: number;
+  drinksCount: number;
+  nights: number;
+  nightsEscaped: number;
+  bestNightScore: number;
+  peakAlcohol: number;
+  favoriteQuote: string;
+  pinnedPhoto: { src: string; caption: string } | null;
+  friendsSince?: string;
+}

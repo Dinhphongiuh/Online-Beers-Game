@@ -6,7 +6,7 @@ import { AVATAR_ICON, drinkingRank } from './lobbyData';
 import { DRUNK_ARCHETYPES } from '../components/AuthPanelModal';
 
 /** What /api/auth/me tells us about the account behind the passport. */
-interface AccountInfo {
+export interface AccountInfo {
   userId: string;
   username: string;
   isGuest?: boolean;
@@ -136,18 +136,23 @@ export const PassportCard: React.FC<{
   escaped: number | null;
   nights: number | null;
   pinnedPhoto?: { src: string; caption: string } | null;
-}> = ({ name, avatar, coins, toastCount, escaped, nights, pinnedPhoto }) => {
-  const [account, setAccount] = useState<AccountInfo | null>(null);
+  /** Someone else's passport (friend view): use this account instead of /api/auth/me. */
+  account?: AccountInfo;
+}> = ({ name, avatar, coins, toastCount, escaped, nights, pinnedPhoto, account: givenAccount }) => {
+  const [ownAccount, setAccount] = useState<AccountInfo | null>(null);
+  const account = givenAccount ?? ownAccount;
+  const isFriendView = Boolean(givenAccount);
   const rank = drinkingRank(toastCount);
 
   useEffect(() => {
+    if (givenAccount) return;
     const token = localStorage.getItem('tram_nhau_auth_token');
     if (!token) return;
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.user && setAccount(d.user))
       .catch(() => null);
-  }, []);
+  }, [givenAccount]);
 
   const displayName = account?.username || name;
   const passportId = account?.userId ?? '';
@@ -312,9 +317,11 @@ export const PassportCard: React.FC<{
           <div>{mrz1}</div>
           <div>{mrz2}</div>
         </div>
-        <div className="mt-1 text-center text-[9px] text-[#7a5c3a]">
-          💡 Gửi <b>Mã hộ chiếu</b> hoặc biệt danh cho bạn bè để họ kết bạn với bạn
-        </div>
+        {!isFriendView && (
+          <div className="mt-1 text-center text-[9px] text-[#7a5c3a]">
+            💡 Gửi <b>Mã hộ chiếu</b> hoặc biệt danh cho bạn bè để họ kết bạn với bạn
+          </div>
+        )}
       </div>
     </div>
   );

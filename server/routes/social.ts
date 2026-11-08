@@ -10,10 +10,12 @@ import { sendServerError } from '../http/respond.ts';
 import { parseRedisJson, requireSession, type SessionUser } from '../http/session.ts';
 import { socialHub } from '../realtime/socialHub.ts';
 import { readPresence, setPresence } from '../services/presence.ts';
+import { summarizeLifetime } from '../../shared/receipts.ts';
 import {
   INVITE_TTL_SECONDS,
   sanitizePresenceInput,
   sortFriends,
+  type FriendProfile,
   type FriendView,
   type SocialSnapshot,
   type SocialUser,
@@ -158,5 +160,50 @@ socialRouter.post('/api/social/invites/:id/dismiss', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     sendServerError(res, error, 'Không xóa được lời rủ');
+  }
+});
+
+// GET hộ chiếu của bạn bè (friends only: strangers can't snoop on your bill-dodging record)
+socialRouter.get('/api/social/friends/:userId/profile', async (req, res) => {
+  try {
+    const user = me(res);
+    const friendId = String(req.params.userId);
+    if (!(await dbService.areFriends(user.userId, friendId))) {
+      return res.status(403).json({ error: 'Kết bạn rồi mới xem được hộ chiếu nhé' });
+    }
+    const [account, profile, receiptStats, presence] = await Promise.all([
+      dbService.findUserById(friendId),
+      dbService.getPlayerProfile(friendId),
+      dbService.listReceiptStats(friendId),
+      readPresence(friendId),
+    ]);
+    if (!account) return res.status(404).json({ error: 'Không tìm thấy bợm nhậu này' });
+    const life = summarizeLifetime(receiptStats as any);
+    let pinnedPhoto: FriendProfile['pinnedPhoto'] = null;
+    if (profile?.pinnedReceiptCode) {
+      const r = await dbService.getMatchReceipt(profile.pinnedReceiptCode);
+      if (r?.funnySnapshot) pinnedPhoto = { src: r.funnySnapshot, caption: r.funnySnapshotCaption };
+    }
+    const result: FriendProfile = {
+      userId: account.userId,
+      username: account.username,
+      avatar: account.avatar || 'dog',
+      title: account.title,
+      isGuest: Boolean(account.isGuest),
+      createdAt: account.createdAt ? new Date(account.createdAt).toISOString() : undefined,
+      drunkArchetype: account.drunkArchetype,
+      presence,
+      coins: profile?.coins ?? account.coins ?? 0,
+      drinksCount: Math.max(profile?.drinksCount ?? 0, account.drinksCount ?? 0, life.totalDrinks),
+      nights: life.nights,
+      nightsEscaped: life.nightsEscaped,
+      bestNightScore: Math.max(life.bestScore, profile?.bestNightScore ?? 0),
+      peakAlcohol: life.peakAlcohol,
+      favoriteQuote: life.favoriteQuote,
+      pinnedPhoto,
+    };
+    res.json(result);
+  } catch (error) {
+    sendServerError(res, error, 'Không tải được hộ chiếu');
   }
 });

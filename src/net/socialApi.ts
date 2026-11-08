@@ -7,6 +7,7 @@ import { useSocialEvents, useSocialLive } from './socialSocket';
 import {
   PRESENCE_HEARTBEAT_MS,
   type CustomNpc,
+  type FriendProfile,
   type SocialSnapshot,
 } from '../../shared/social';
 
@@ -52,6 +53,7 @@ export const socialApi = {
   remove: (userId: string) => api(`/api/social/friends/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
   inviteToTable: (userId: string, roomCode: string) =>
     api(`/api/social/friends/${encodeURIComponent(userId)}/invite`, { method: 'POST', body: { roomCode } }),
+  friendProfile: (userId: string) => api<FriendProfile>(`/api/social/friends/${encodeURIComponent(userId)}/profile`),
   dismissInvite: (id: string) => api(`/api/social/invites/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} }),
   listNpcs: () => api<{ npcs: CustomNpc[] }>('/api/npcs'),
   createNpc: (npc: Omit<CustomNpc, 'npcId'>) => api<{ npc: CustomNpc }>('/api/npcs', { method: 'POST', body: npc }),
