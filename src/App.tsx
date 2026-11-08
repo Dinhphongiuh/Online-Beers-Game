@@ -1120,7 +1120,10 @@ export default function App({
   }, [userKnockedOut]);
   useEffect(() => () => passOutTimersRef.current.forEach((t) => window.clearTimeout(t)), []);
 
-  /** Tăng 2: same crew, new bill, off to the karaoke room (still drunk!). */
+  /**
+   * Tăng 2: same crew, new bill, still drunk. Not wired right now — the report shows
+   * "Tăng 2 (Bida)" as COMING SOON; hook this back up when the bida stage ships.
+   */
   const handleAfterParty = () => {
     setNightReport(null);
     nightEndingRef.current = false;
@@ -5471,7 +5474,6 @@ export default function App({
               report={nightReport}
               playerName={userPlayer.name.replace(/\s*\(Bạn\)\s*/g, '')}
               saved={nightReportSaved}
-              onAfterParty={handleAfterParty}
               onExitToMenu={() => {
                 setNightReport(null);
                 sceneRef.current?.releasePointerLock();

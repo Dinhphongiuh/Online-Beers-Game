@@ -1,6 +1,6 @@
 import { Room, type Client } from '@colyseus/core';
 import { schema, t, type SchemaType } from '@colyseus/schema';
-import { dbService } from './db.ts';
+import { dbService } from './db/index.ts';
 import { redis } from './redis.ts';
 import {
   MSG,

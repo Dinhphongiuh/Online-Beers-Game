@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { NightReport } from '../game/nightReportLogic';
 
 interface NightReportModalProps {
@@ -7,7 +7,6 @@ interface NightReportModalProps {
   /** Saved to the Hộ Chiếu Tửu Lượng (MongoDB) — null while saving, false if it failed. */
   saved: boolean | null;
   onExitToMenu: () => void;
-  onAfterParty: () => void;
 }
 
 const vnd = (n: number) => `${n.toLocaleString('vi-VN')}đ`;
@@ -26,8 +25,8 @@ export const NightReportModal: React.FC<NightReportModalProps> = ({
   playerName,
   saved,
   onExitToMenu,
-  onAfterParty,
 }) => {
+  const [bidaSoon, setBidaSoon] = useState(false);
   const ending = ENDING_STYLE[report.ending.kind];
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 backdrop-blur-sm p-3">
@@ -149,10 +148,19 @@ export const NightReportModal: React.FC<NightReportModalProps> = ({
         <div className="grid grid-cols-2 gap-2 px-5 pb-5">
           <button
             type="button"
-            onClick={onAfterParty}
-            className="rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black py-3 text-sm shadow-lg"
+            data-testid="after-party-bida-btn"
+            onClick={() => setBidaSoon(true)}
+            className="relative rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-black py-3 text-sm shadow-lg"
           >
-            🎤 Tăng 2 (Karaoke)
+            🎱 Tăng 2 (Bida)
+            {bidaSoon && (
+              <span
+                data-testid="after-party-coming-soon"
+                className="absolute -top-3 left-1/2 -translate-x-1/2 rotate-[-6deg] whitespace-nowrap rounded-md border-2 border-amber-300 bg-zinc-900 px-2 py-0.5 text-[11px] text-amber-300 shadow-lg"
+              >
+                🚧 COMING SOON
+              </span>
+            )}
           </button>
           <button
             type="button"
