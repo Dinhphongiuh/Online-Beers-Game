@@ -69,9 +69,13 @@ export const HostRoomPanel: React.FC<{
   drunkSpeed: DrunkSpeedId;
   rules: TableRules;
   roomCode: string;
+  /** Step badge above the title, e.g. "BƯỚC 1/2 • CHỌN QUÁN". */
+  stepLabel?: string;
+  title?: string;
+  confirmLabel?: string;
   onClose: () => void;
   onConfirm: (map: PubTheme, drunkSpeed: DrunkSpeedId, rules: TableRules) => void;
-}> = ({ map, drunkSpeed, rules, roomCode, onClose, onConfirm }) => {
+}> = ({ map, drunkSpeed, rules, roomCode, stepLabel, title, confirmLabel, onClose, onConfirm }) => {
   const [m, setM] = useState(map);
   const [speed, setSpeed] = useState(drunkSpeed);
   const [r, setR] = useState(rules);
@@ -81,8 +85,8 @@ export const HostRoomPanel: React.FC<{
       <div className="chalkboard relative w-[min(560px,96vw)] max-h-[92vh] overflow-y-auto rounded-2xl p-5 chalk-text">
         <CloseButton onClose={onClose} />
         <div className="text-center mb-4">
-          <div className="text-[11px] tracking-[0.3em] text-amber-200/80">THỰC ĐƠN GỌI MÓN</div>
-          <h2 className="font-neon text-2xl text-amber-300">🔑 Tạo Bàn Riêng</h2>
+          <div className="text-[11px] tracking-[0.3em] text-amber-200/80">{stepLabel ?? 'THỰC ĐƠN GỌI MÓN'}</div>
+          <h2 className="font-neon text-2xl text-amber-300">{title ?? '🔑 Tạo Bàn Riêng'}</h2>
           <div className="text-xs text-white/70 mt-1">
             Mã bàn: <span className="font-mono font-bold text-amber-200 tracking-widest">#{roomCode}</span>
           </div>
@@ -178,7 +182,7 @@ export const HostRoomPanel: React.FC<{
           onClick={() => onConfirm(m, speed, r)}
           className="w-full py-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-red-900 font-black text-base shadow-lg cursor-pointer active:scale-[0.98] transition"
         >
-          ✍️ Chốt Thực Đơn & Mở Bàn
+          {confirmLabel ?? '✍️ Chốt Thực Đơn & Mở Bàn'}
         </button>
       </div>
     </ModalBackdrop>

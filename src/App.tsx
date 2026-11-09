@@ -553,6 +553,8 @@ export default function App({
         showToast(`🌐🍻 ${p.name} vừa kéo ghế nhựa ngồi vào bàn!`);
       },
       onPlayerLeft: (p) => showToast(`👋 ${p.name} đã rời bàn (chắc về trốn bill).`),
+      // Remote poses → scene directly: walking around must not re-render the whole app at 20 Hz
+      onPoses: (poses) => sceneRef.current?.setRemotePoses(poses),
     }
   );
   const remoteGamePlayers = useMemo(
@@ -565,21 +567,6 @@ export default function App({
   );
   const playersForHitRef = useRef(scenePlayers);
   playersForHitRef.current = scenePlayers;
-
-  // Remote poses → scene (they walk around in free roam, otherwise sit on their stool)
-  useEffect(() => {
-    const poses: Record<string, { x: number; z: number; angle: number; roaming: boolean; moving: boolean }> = {};
-    tableNet.remotePlayers.forEach((p) => {
-      poses[remotePlayerId(p.sessionId)] = {
-        x: p.x,
-        z: p.z,
-        angle: p.angle,
-        roaming: p.roaming,
-        moving: p.moving,
-      };
-    });
-    sceneRef.current?.setRemotePoses(poses);
-  }, [tableNet.remotePlayers]);
 
   // Local pose → network (throttled inside the client)
   useEffect(() => {

@@ -12,6 +12,23 @@ export const TABLE_MAX_PLAYERS = 8;
 export const POSE_SEND_INTERVAL_MS = 66;
 export const TABLE_PATCH_MS = 50;
 
+/** Where & how hard the table drinks — picked by the host, shared with every guest. */
+export const TABLE_THEMES = ['sidewalk', 'bo_ke', 'rooftop'] as const;
+export const TABLE_SPEEDS = ['lai_rai', 'toi_ben', 'tu_chien'] as const;
+export interface TableSetup {
+  theme: (typeof TABLE_THEMES)[number];
+  drunkSpeed: (typeof TABLE_SPEEDS)[number];
+  rules: { micDzo: boolean; randomEvents: boolean; billBrawl: boolean };
+}
+export const DEFAULT_TABLE_SETUP: TableSetup = {
+  theme: 'bo_ke',
+  drunkSpeed: 'toi_ben',
+  rules: { micDzo: false, randomEvents: true, billBrawl: true },
+};
+
+/** 'lobby' = phòng chờ (everyone gets ready), 'playing' = the night has started. */
+export type TablePhase = 'lobby' | 'playing';
+
 export interface TableJoinOptions {
   roomCode: string;
   playerId: string;
@@ -20,6 +37,15 @@ export interface TableJoinOptions {
   clothing: string;
   hat: string;
   glassType: string;
+  /** Host opening the table: the venue/rules everyone will play with. */
+  setup?: TableSetup;
+}
+
+/** Room-level state every client mirrors (who hosts, which venue, lobby or playing). */
+export interface TableInfo {
+  phase: TablePhase;
+  hostSessionId: string;
+  setup: TableSetup;
 }
 
 /** Plain-JSON view of a synced player (what the client works with). */
@@ -44,6 +70,8 @@ export interface NetPlayer {
   /** Mic loudness 0..1, drives the remote mouth/bubble and the "DZÔ" meter. */
   voiceLevel: number;
   joinedAt: number;
+  /** Phòng chờ: "Sẵn sàng" toggled. */
+  ready: boolean;
   /** Sổ Nợ: "NỢ 1 CHẦU NHẬU TỪ 08/11" while their creditor sits at this table (else ''). */
   debt: string;
 }
@@ -146,6 +174,10 @@ export const MSG = {
   rtcOffer: 'rtc:offer',
   rtcAnswer: 'rtc:answer',
   rtcIce: 'rtc:ice',
+  // Phòng chờ
+  ready: 'lobby:ready',
+  setup: 'lobby:setup',
+  start: 'lobby:start',
 } as const;
 
 const clampNum = (v: unknown, min: number, max: number, fallback = 0) => {
@@ -229,4 +261,27 @@ export function normalizeRoomCode(code: unknown): string {
   const s = typeof code === 'string' ? code : '';
   const digits = s.replace(/^TRẠM-NHẬU-/, '').replace(/[^0-9A-Za-z]/g, '').slice(0, 12);
   return digits || '8888';
+}
+
+export function sanitizeSetup(m: unknown): TableSetup | null {
+  if (!m || typeof m !== 'object') return null;
+  const o = m as Record<string, unknown>;
+  const r = (o.rules && typeof o.rules === 'object' ? o.rules : {}) as Record<string, unknown>;
+  const d = DEFAULT_TABLE_SETUP;
+  return {
+    theme: TABLE_THEMES.includes(o.theme as TableSetup['theme']) ? (o.theme as TableSetup['theme']) : d.theme,
+    drunkSpeed: TABLE_SPEEDS.includes(o.drunkSpeed as TableSetup['drunkSpeed'])
+      ? (o.drunkSpeed as TableSetup['drunkSpeed'])
+      : d.drunkSpeed,
+    rules: {
+      micDzo: typeof r.micDzo === 'boolean' ? r.micDzo : d.rules.micDzo,
+      randomEvents: typeof r.randomEvents === 'boolean' ? r.randomEvents : d.rules.randomEvents,
+      billBrawl: typeof r.billBrawl === 'boolean' ? r.billBrawl : d.rules.billBrawl,
+    },
+  };
+}
+
+/** Every human at the table pressed "Sẵn sàng" (the host starts it, so they count as ready). */
+export function allPlayersReady(players: { sessionId: string; ready: boolean }[], hostSessionId: string) {
+  return players.length > 0 && players.every((p) => p.ready || p.sessionId === hostSessionId);
 }

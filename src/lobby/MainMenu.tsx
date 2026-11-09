@@ -37,6 +37,10 @@ import { FriendProfileModal } from './FriendProfileModal';
 import { UnfriendConfirmModal, type UnfriendTarget } from './UnfriendConfirmModal';
 import { socialApi, useCustomNpcs, useSocial } from '../net/socialApi';
 import { useSocialEvents } from '../net/socialSocket';
+import { TableNetClient, handOffTableClient, type NetConnectionState, type TableJoinMode } from '../net/tableClient';
+import { getNetPlayerId } from '../net/useTableNet';
+import type { NetPlayer, TableInfo, TableSetup } from '../../shared/tableNet';
+import { TableWaitingRoom, type WaitingFriend } from './TableWaitingRoom';
 import { presenceNote, socialEventToast, type CustomNpc } from '../../shared/social';
 
 /** Notes for the built-in regulars in the NPC tab. */
@@ -174,7 +178,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [micTest, setMicTest] = useState(false);
   const [pops, setPops] = useState<ReactionPop[]>([]);
-  const [pendingStart, setPendingStart] = useState(false);
+  // ---- Realtime table: Bước 1 chọn quán → Bước 2 phòng chờ → everyone starts together ----
+  const [tableNet, setTableNet] = useState<TableNetClient | null>(null);
+  const [netConn, setNetConn] = useState<NetConnectionState>('idle');
+  const [netInfo, setNetInfo] = useState<TableInfo | null>(null);
+  const [netPlayers, setNetPlayers] = useState<NetPlayer[]>([]);
+  const [waitingOpen, setWaitingOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [logoFlickerKey, setLogoFlickerKey] = useState(0);
@@ -484,38 +493,114 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   );
 
   // ---- Start flow ----
-  const everyoneReady =
-    squad.length > 0 &&
-    !!ready.user &&
-    squad.every((m) => seatedIds.includes(m.id) && ready[m.id]);
-
   /**
-   * Only the NPCs you invited sit down (nobody invited = drinking alone); real friends join
-   * the same table code once they accept your invite. `joinCode` = entering someone else's table.
+   * The night starts for the whole table at once (host pressed "DZÔ!" in the phòng chờ).
+   * Venue/speed/rules come from the room so every guest plays the host's table; only the
+   * host brings their NPCs along.
    */
-  const startMatch = useCallback((joinCode?: string) => {
-    if (starting) return;
-    setStarting(true);
-    setPanel('none');
-    sound.stopMicCheers();
-    sound.playCrowdDzo();
-    // Guests at someone else's table don't bring their own NPCs along
-    const seated = joinCode ? [] : [...squad].sort((a, b) => a.seatIndex - b.seatIndex);
-    const squadIds = seated.map((m) => m.id);
-    onStart(
-      {
-        playerName: name.trim() || 'Bợm Nhậu',
-        skin,
-        squadIds,
-        customNpcs: customPlayers.filter((p) => squadIds.includes(p.id)),
-        theme: map,
-        drunkSpeed,
-        rules,
-        roomCode: joinCode ?? roomCode,
-      },
-      graphics
-    );
-  }, [starting, name, skin, squad, customPlayers, map, drunkSpeed, rules, roomCode, graphics, onStart]);
+  const startMatch = useCallback(
+    (net: TableNetClient, info: TableInfo) => {
+      if (starting) return;
+      setStarting(true);
+      setPanel('none');
+      setWaitingOpen(false);
+      sound.stopMicCheers();
+      sound.playCrowdDzo();
+      const seated = net.isHost ? [...squad].sort((a, b) => a.seatIndex - b.seatIndex) : [];
+      const squadIds = seated.map((m) => m.id);
+      // Same connection goes on into the game: nobody leaves / re-joins the room
+      handOffTableClient(net);
+      onStart(
+        {
+          playerName: name.trim() || 'Bợm Nhậu',
+          skin,
+          squadIds,
+          customNpcs: customPlayers.filter((p) => squadIds.includes(p.id)),
+          theme: info.setup.theme,
+          drunkSpeed: info.setup.drunkSpeed,
+          rules: info.setup.rules,
+          roomCode: net.roomCode,
+        },
+        graphics
+      );
+    },
+    [starting, name, skin, squad, customPlayers, graphics, onStart]
+  );
+
+  /** Sit at table `code`: host opens it with `setup`, guests knock until the host has. */
+  const openTable = useCallback(
+    (mode: TableJoinMode, code: string, setup?: TableSetup) => {
+      tableNet?.dispose();
+      const net = new TableNetClient(
+        { roomCode: code, playerId: getNetPlayerId(), name: name.trim() || 'Bợm Nhậu', ...skin, setup },
+        mode
+      );
+      setTableNet(net);
+      setNetConn('connecting');
+      setNetInfo(null);
+      setNetPlayers([]);
+      setWaitingOpen(true);
+      void net.connect();
+    },
+    [tableNet, name, skin]
+  );
+
+  const leaveTable = useCallback(() => {
+    tableNet?.dispose();
+    setTableNet(null);
+    setNetConn('idle');
+    setNetInfo(null);
+    setNetPlayers([]);
+    setWaitingOpen(false);
+    setHostName(null);
+    setRoomCode(randomRoomCode());
+  }, [tableNet]);
+
+  // Mirror the table connection into React (roster/phase only — poses don't matter here)
+  const startRef = useRef(startMatch);
+  startRef.current = startMatch;
+  useEffect(() => {
+    if (!tableNet) return;
+    const offs = [
+      tableNet.onConnection.on(setNetConn),
+      tableNet.onPlayers.on(setNetPlayers),
+      tableNet.onInfo.on((info) => {
+        setNetInfo(info);
+        // Host poured the first round (or we walked in on a table already drinking)
+        if (info.phase === 'playing') startRef.current(tableNet, info);
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [tableNet]);
+
+  // Who hosts / which venue: follow the room so the lobby card shows the real table
+  useEffect(() => {
+    if (!netInfo || !tableNet) return;
+    setMap(netInfo.setup.theme);
+    setDrunkSpeed(netInfo.setup.drunkSpeed);
+    setRules(netInfo.setup.rules);
+    const host = netPlayers.find((p) => p.sessionId === netInfo.hostSessionId);
+    setHostName(tableNet.isHost ? null : host?.name ?? 'Chủ bàn');
+  }, [netInfo, netPlayers, tableNet]);
+
+  // Unmount without starting (logout…): close the connection unless it went on into the game
+  const tableNetRef = useRef(tableNet);
+  tableNetRef.current = tableNet;
+  const startingRef = useRef(starting);
+  startingRef.current = starting;
+  useEffect(
+    () => () => {
+      if (!startingRef.current) tableNetRef.current?.dispose();
+    },
+    []
+  );
+
+  const waitingFriends = useMemo<WaitingFriend[]>(() => {
+    const atTable = new Set(netPlayers.map((p) => p.name));
+    return (social?.friends ?? [])
+      .filter((f) => f.presence.state !== 'offline' && !atTable.has(f.username))
+      .map((f) => ({ userId: f.userId, username: f.username, avatar: f.avatar, invited: invitedFriendIds.includes(f.userId) }));
+  }, [social, netPlayers, invitedFriendIds]);
 
   // ---- Friends actions ----
   const handleInviteFriend = async (userId: string, username: string) => {
@@ -577,38 +662,29 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     showToast(`🛵 Đang chạy qua bàn #${code} của ${fromName}...`);
     setRoomCode(code);
     setHostName(fromName);
-    startMatch(code);
+    openTable('guest', code);
   };
   const handleDismissTableInvite = async (inviteId: string) => {
     await socialApi.dismissInvite(inviteId).catch(() => null);
     void refreshSocial();
   };
 
-  // Quick play / join: start automatically once the table fills up and everyone is ready
-  useEffect(() => {
-    if (pendingStart && everyoneReady) {
-      later(startMatch, 400);
-      setPendingStart(false);
-    }
-  }, [pendingStart, everyoneReady, startMatch, later]);
-
+  /** "VÀO NHẬU!": already at a table → back to its phòng chờ, else Bước 1 chọn quán. */
   const handleQuickPlay = () => {
     sound.playBottleOpen();
-    showToast(
-      squad.length
-        ? '🏠➔🛵 Đang khởi hành từ căn nhà ống trong hẻm ra quán nhậu!'
-        : '🍺 Chưa rủ ai — hôm nay nhậu một mình!'
-    );
-    startMatch();
+    if (tableNet) setWaitingOpen(true);
+    else setPanel('host');
   };
+  const handleStartButton = handleQuickPlay;
 
   const handleToggleReady = () => {
+    const me = netPlayers.find((p) => p.sessionId === tableNet?.sessionId);
     sound.playMugSlam();
-    setReady((prev) => ({ ...prev, user: !prev.user }));
+    tableNet?.setReady(!me?.ready);
   };
 
-  const handleStartButton = () => {
-    startMatch();
+  const handleHostStart = () => {
+    if (!tableNet?.startNight()) showToast('⚠️ Mất kết nối bàn, thử lại xíu nha!');
   };
 
   const toggleMicTest = async () => {
@@ -780,19 +856,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                       {p.isUser ? name || 'Bạn' : p.name}
                     </span>
                   </div>
-                  {p.isUser ? (
-                    <button
-                      {...sfx}
-                      onClick={handleToggleReady}
-                      className={`pointer-events-auto whitespace-nowrap px-2.5 py-1 rounded-lg text-[10px] font-black shadow-lg cursor-pointer active:scale-95 transition ${
-                        ready.user
-                          ? 'bg-emerald-500 text-zinc-950'
-                          : 'bg-amber-400 text-red-900 hover:bg-amber-300 animate-pulse'
-                      }`}
-                    >
-                      {ready.user ? '✅ Đã Lên Mồi!' : 'SẴN SÀNG / LÊN MỒI!'}
-                    </button>
-                  ) : (
+                  {p.isUser ? null : (
                     <span
                       className={`whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-black ${
                         !isSeated
@@ -1009,17 +1073,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             data-testid="mainmenu-bottom-start-btn"
             onClick={handleStartButton}
             className={`font-neon whitespace-nowrap px-6 py-3 rounded-2xl text-lg shadow-2xl cursor-pointer transition active:scale-95 border-2 ${
-              everyoneReady || squad.length === 0
-                ? 'bg-gradient-to-b from-red-500 to-red-700 border-amber-300 text-amber-100 hover:from-red-400'
-                : 'bg-zinc-800/90 border-zinc-600 text-zinc-400'
+              'bg-gradient-to-b from-red-500 to-red-700 border-amber-300 text-amber-100 hover:from-red-400'
             }`}
           >
-            {squad.length === 0 ? '🍺 Vào Nhậu!' : '🍻 Vào Nhậu!'}
+            {tableNet ? '🪑 Về Phòng Chờ' : squad.length === 0 ? '🍺 Vào Nhậu!' : '🍻 Vào Nhậu!'}
           </button>
           <div className="text-[10px] font-bold text-amber-200 bg-black/75 border border-amber-500/40 rounded-full px-3 py-0.5">
-            {squad.length === 0
-              ? 'Ngồi một mình cũng nhậu được!'
-              : `${squad.filter((m) => ready[m.id]).length + (ready.user ? 1 : 0)}/${squad.length + 1} người đã sẵn sàng xuất phát`}
+            {tableNet
+              ? `Bàn #${roomCode} • ${netPlayers.filter((p) => p.ready || p.sessionId === netInfo?.hostSessionId).length}/${netPlayers.length} người sẵn sàng`
+              : '① Chọn quán → ② Chờ anh em sẵn sàng → Dzô!'}
           </div>
         </div>
       )}
@@ -1083,15 +1145,28 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           drunkSpeed={drunkSpeed}
           rules={rules}
           roomCode={roomCode}
-          onClose={() => setPanel('none')}
+          stepLabel="BƯỚC 1/2 • CHỌN QUÁN"
+          title={tableNet ? '🔁 Đổi Quán' : '📍 Hôm Nay Nhậu Đâu?'}
+          confirmLabel={tableNet ? '✍️ Chốt quán mới' : '✍️ Chốt quán → Vào phòng chờ'}
+          onClose={() => {
+            setPanel('none');
+            if (tableNet) setWaitingOpen(true);
+          }}
           onConfirm={(m, s, r) => {
             sound.playBottleOpen();
             setMap(m);
             setDrunkSpeed(s);
             setRules(r);
-            setHostName(null);
             setPanel('none');
-            showToast(`🔑 Đã mở bàn riêng #${roomCode} — bấm [+] trên ghế trống để rủ nhậu!`);
+            const setup: TableSetup = { theme: m, drunkSpeed: s, rules: r };
+            if (tableNet?.isHost) {
+              tableNet.sendSetup(setup);
+              setWaitingOpen(true);
+              showToast('🔁 Đã đổi quán — anh em xác nhận sẵn sàng lại nha!');
+            } else {
+              setHostName(null);
+              openTable('host', roomCode, setup);
+            }
           }}
         />
       )}
@@ -1104,7 +1179,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             setHostName('Chủ bàn');
             setPanel('none');
             showToast(`🪑 Đang nhảy vào bàn #${code}...`);
-            startMatch(code);
+            openTable('guest', code);
           }}
         />
       )}
@@ -1182,6 +1257,31 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             showToast(`🤖 ${created.name} đã vào danh sách NPC — bấm "Rủ" để kéo vào bàn!`);
           }}
           onClose={() => setNpcCreatorOpen(false)}
+        />
+      )}
+
+      {/* Bước 2: phòng chờ */}
+      {tableNet && waitingOpen && !starting && panel === 'none' && (
+        <TableWaitingRoom
+          roomCode={roomCode}
+          connection={netConn}
+          mySessionId={tableNet.sessionId}
+          info={netInfo}
+          players={netPlayers}
+          npcs={lobbyPlayers.filter((p) => !p.isUser)}
+          friends={isLoggedIn ? waitingFriends : []}
+          onToggleReady={handleToggleReady}
+          onStart={handleHostStart}
+          onChangeVenue={() => {
+            setWaitingOpen(false);
+            setPanel('host');
+          }}
+          onInviteFriend={(id, username) => void handleInviteFriend(id, username)}
+          onLeave={() => {
+            sound.playBottleOpen();
+            leaveTable();
+            showToast('🚪 Đã rời bàn — về nhà sớm là vợ thương!');
+          }}
         />
       )}
 

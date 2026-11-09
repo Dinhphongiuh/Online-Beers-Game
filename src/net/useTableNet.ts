@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NetChatMessage, NetPlayer, TableEventEnvelope } from '../../shared/tableNet';
 import type { Player } from '../game/types';
-import { TableNetClient, type NetConnectionState } from './tableClient';
+import { TableNetClient, takeTableClient, type NetConnectionState, type NetPose } from './tableClient';
 
 const NET_ID_KEY = 'tram_nhau_net_player_id';
 
@@ -63,6 +63,8 @@ export function useTableNet(
     onEvent?: (e: TableEventEnvelope) => void;
     onPlayerJoined?: (p: NetPlayer) => void;
     onPlayerLeft?: (p: NetPlayer) => void;
+    /** 20 Hz remote poses by game player id — wire straight to the 3D scene (no re-render). */
+    onPoses?: (poses: Record<string, NetPose>) => void;
   } = {}
 ): TableNetHandle {
   const [client, setClient] = useState<TableNetClient | null>(null);
@@ -75,15 +77,31 @@ export function useTableNet(
   profileRef.current = profile;
 
   useEffect(() => {
-    const net = new TableNetClient({
-      roomCode,
-      playerId: getNetPlayerId(),
-      ...profileRef.current,
-    });
+    // Coming from the phòng chờ: keep that very connection (no leave/re-join at the table)
+    const adopted = takeTableClient(roomCode);
+    const net =
+      adopted ??
+      new TableNetClient({
+        roomCode,
+        playerId: getNetPlayerId(),
+        ...profileRef.current,
+      });
     setClient(net);
     // Join/leave toasts only after the first snapshot (so we don't announce who was already there)
-    let known = new Map<string, NetPlayer>();
+    let known = new Map<string, NetPlayer>(net.players.map((p) => [p.sessionId, p]));
+    const emitPoses = (poses: Record<string, NetPose>) => {
+      const byGameId: Record<string, NetPose> = {};
+      for (const id in poses) if (id !== net.sessionId) byGameId[remotePlayerId(id)] = poses[id];
+      handlersRef.current.onPoses?.(byGameId);
+    };
+    if (adopted) {
+      setConnection(net.state);
+      setPlayers(net.players);
+      setChatFeed(net.chatLog.map((m) => ({ ...m, sessionId: net.players.find((p) => p.playerId === m.senderId)?.sessionId ?? null })));
+      emitPoses(net.poses);
+    }
     const offs = [
+      net.onPoses.on(emitPoses),
       net.onConnection.on(setConnection),
       net.onPlayers.on((list) => {
         setPlayers(list);
@@ -107,7 +125,7 @@ export function useTableNet(
       }),
       net.onEvent.on((e) => handlersRef.current.onEvent?.(e)),
     ];
-    void net.connect();
+    if (!adopted) void net.connect();
     return () => {
       offs.forEach((off) => off());
       net.dispose();

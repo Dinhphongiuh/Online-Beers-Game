@@ -6,7 +6,10 @@ import {
   MSG,
   TABLE_MAX_PLAYERS,
   TABLE_PATCH_MS,
+  DEFAULT_TABLE_SETUP,
+  allPlayersReady,
   normalizeRoomCode,
+  sanitizeSetup,
   sanitizeChatText,
   sanitizeEvent,
   sanitizePose,
@@ -16,6 +19,7 @@ import {
   type SignalOut,
   type TableEventEnvelope,
   type TableJoinOptions,
+  type TableSetup,
 } from '../shared/tableNet.ts';
 
 export const NetPlayerState = schema(
@@ -38,6 +42,7 @@ export const NetPlayerState = schema(
     speaking: t.boolean(),
     voiceLevel: t.float32(),
     joinedAt: t.float64(),
+    ready: t.boolean(),
     debt: t.string(),
   },
   'NetPlayerState'
@@ -47,6 +52,13 @@ export type NetPlayerState = SchemaType<typeof NetPlayerState>;
 export const TableRoomState = schema(
   {
     roomCode: t.string(),
+    /** 'lobby' (phòng chờ) → 'playing' once the host starts the night. */
+    phase: t.string(),
+    hostSessionId: t.string(),
+    theme: t.string(),
+    drunkSpeed: t.string(),
+    /** JSON of TableSetup['rules'] (schema stays flat). */
+    rules: t.string(),
     players: t.map(NetPlayerState),
   },
   'TableRoomState'
@@ -85,7 +97,10 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
     this.roomCode = normalizeRoomCode(options.roomCode);
     const state = new TableRoomState();
     state.roomCode = this.roomCode;
+    state.phase = 'lobby';
+    state.hostSessionId = '';
     this.setState(state);
+    this.applySetup(sanitizeSetup(options.setup) ?? DEFAULT_TABLE_SETUP);
     this.patchRate = TABLE_PATCH_MS;
     this.autoDispose = true;
 
@@ -167,6 +182,27 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
       }
     });
 
+    // ---- Phòng chờ: host picks the venue, everyone readies up, host starts ----
+    this.onMessage(MSG.ready, (client, raw: { ready?: unknown }) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p && this.state.phase === 'lobby') p.ready = raw?.ready === true;
+    });
+    this.onMessage(MSG.setup, (client, raw) => {
+      if (client.sessionId !== this.state.hostSessionId || this.state.phase !== 'lobby') return;
+      const setup = sanitizeSetup(raw);
+      if (!setup) return;
+      this.applySetup(setup);
+      // New venue → guests confirm again
+      this.state.players.forEach((p) => {
+        if (p.sessionId !== this.state.hostSessionId) p.ready = false;
+      });
+    });
+    this.onMessage(MSG.start, (client) => {
+      if (client.sessionId !== this.state.hostSessionId || this.state.phase !== 'lobby') return;
+      if (!allPlayersReady([...this.state.players.values()], this.state.hostSessionId)) return;
+      this.state.phase = 'playing';
+    });
+
     // ---- WebRTC voice mesh signaling ----
     this.onMessage(MSG.rtcJoin, (client) => {
       const others = [...this.rtcPeers].filter((id) => id !== client.sessionId);
@@ -196,7 +232,14 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
     p.hat = str(options.hat, 24, 'none');
     p.glassType = str(options.glassType, 24, 'beer_mug');
     p.joinedAt = Date.now();
+    p.ready = false;
     this.state.players.set(client.sessionId, p);
+    // First one in opens the table (and brings the venue they picked)
+    if (!this.state.hostSessionId || !this.state.players.has(this.state.hostSessionId)) {
+      this.state.hostSessionId = client.sessionId;
+      const setup = sanitizeSetup(options.setup);
+      if (setup && this.state.phase === 'lobby') this.applySetup(setup);
+    }
 
     bestEffort(() =>
       redis.set(
@@ -216,11 +259,22 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
     }
   }
 
+  private applySetup(setup: TableSetup) {
+    this.state.theme = setup.theme;
+    this.state.drunkSpeed = setup.drunkSpeed;
+    this.state.rules = JSON.stringify(setup.rules);
+  }
+
   onLeave(client: Client) {
     const p = this.state.players.get(client.sessionId);
     this.state.players.delete(client.sessionId);
     if (this.rtcPeers.delete(client.sessionId)) {
       this.broadcast(MSG.rtcPeerLeft, client.sessionId);
+    }
+    // Host walked out: the longest-seated drinker takes over the table
+    if (client.sessionId === this.state.hostSessionId) {
+      const next = [...this.state.players.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0];
+      this.state.hostSessionId = next?.sessionId ?? '';
     }
     for (const [id, lock] of this.lastPropOwner) {
       if (lock.owner === client.sessionId) this.lastPropOwner.delete(id);

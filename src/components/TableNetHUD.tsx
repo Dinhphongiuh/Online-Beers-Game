@@ -19,6 +19,7 @@ const BUBBLE_MS = 6000;
 const CONNECTION_LABEL: Record<NetConnectionState, { text: string; dot: string }> = {
   idle: { text: 'Chưa kết nối', dot: 'bg-zinc-500' },
   connecting: { text: 'Đang kết nối bàn…', dot: 'bg-amber-400 animate-pulse' },
+  waiting_host: { text: 'Chờ chủ bàn mở bàn…', dot: 'bg-amber-400 animate-pulse' },
   online: { text: 'Online', dot: 'bg-emerald-400' },
   offline: { text: 'Mất mạng — đang thử lại', dot: 'bg-red-500 animate-pulse' },
 };
