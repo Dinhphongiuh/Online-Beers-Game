@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Test-only Gaussian splat (Spark example asset, license not stated). Do not commit.
+public/assets/splats/sample-street.spz

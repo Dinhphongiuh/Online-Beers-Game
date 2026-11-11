@@ -68,7 +68,8 @@ export interface VrmCharacter {
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
 
-function prepareVrm(gltf: { scene: THREE.Group; userData: Record<string, unknown> }): VRM {
+/** Post-load clean-up shared by the WebGL and WebGPU loaders. */
+export function prepareVrm(gltf: { scene: THREE.Group; userData: Record<string, unknown> }): VRM {
   const vrm = gltf.userData.vrm as VRM | undefined;
   if (!vrm) throw new Error('File này không phải model VRM hợp lệ.');
   // Faster rendering and a consistent +Z facing for VRM 0.x exports.

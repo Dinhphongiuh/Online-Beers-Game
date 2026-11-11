@@ -14,4 +14,11 @@ export const DEV_FEATURES: DevFeature[] = [
       'Nhân vật anime/stylized (VRoid Studio + @pixiv/three-vrm): ngồi ghế nhựa, cầm ly, biểu cảm say, chớp mắt, tóc có vật lý.',
     status: 'prototype',
   },
+  {
+    id: 'nextgen-bar',
+    title: 'Quán Nhậu Next-Gen',
+    description:
+      'Quán nhậu trên WebGPU: TRAA, SSGI, GTAO, SSR, bloom (TSL) và phông nền Gaussian Splat quét từ cảnh thật.',
+    status: 'prototype',
+  },
 ];

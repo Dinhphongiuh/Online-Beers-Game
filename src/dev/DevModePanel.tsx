@@ -6,9 +6,12 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import type { DevFeature } from '../../shared/devFeatures';
 
-// three-vrm only loads once an admin actually opens the lab.
+// three-vrm / WebGPU only load once someone actually opens a lab.
 const VrmCharacterLab = lazy(() =>
   import('./VrmCharacterLab').then((module) => ({ default: module.VrmCharacterLab }))
+);
+const NextGenBarLab = lazy(() =>
+  import('./NextGenBarLab').then((module) => ({ default: module.NextGenBarLab }))
 );
 
 const TOKEN_KEY = 'tram_nhau_auth_token';
@@ -97,6 +100,11 @@ export const DevModePanel: React.FC<{ onClose: () => void }> = ({ onClose }) => 
           {current?.id === 'vrm-character' && (
             <Suspense fallback={<p className="text-zinc-400 text-sm">Đang tải VRM Lab…</p>}>
               <VrmCharacterLab />
+            </Suspense>
+          )}
+          {current?.id === 'nextgen-bar' && (
+            <Suspense fallback={<p className="text-zinc-400 text-sm">Đang tải WebGPU…</p>}>
+              <NextGenBarLab />
             </Suspense>
           )}
         </div>
