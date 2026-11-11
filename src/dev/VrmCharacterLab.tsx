@@ -49,8 +49,6 @@ export const VRM_PRESETS = [
   // The first two are the official in-game characters (vrmHumanRig.ts VRM_HUMAN_MODELS).
   { id: 'male', label: '👨 Nam', name: 'Sakurada Fumiriya', url: '/assets/characters/vrm/male_fumiriya.vrm' },
   { id: 'female', label: '👩 Nữ', name: 'pixiv VRM1 Sample', url: '/assets/characters/vrm/female_pixiv.vrm' },
-  { id: 'female2', label: '👩 Nữ 2', name: 'Sendagaya Shino', url: '/assets/characters/vrm/female_shino.vrm' },
-  { id: 'female3', label: '👩 Nữ 3', name: 'Sendagaya Shibu', url: '/assets/characters/vrm/female_shibu.vrm' },
   { id: 'default', label: '📁 default.vrm', name: 'default.vrm', url: DEFAULT_VRM_URL },
 ] as const;
 
