@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { normalizeUserAccess, type UserAccess } from '../../shared/roles';
 import {
   validateEmail,
   validateLoginIdentifier,
@@ -31,6 +32,7 @@ import {
   Wallet
 } from 'lucide-react';
 import { CharacterAvatar } from '../game/types';
+import type { ChibiAppearanceDNA } from '../../shared/appearance';
 
 // ============================================================================
 // 1. PROCEDURAL WEB AUDIO ENGINE (ZERO EXTERNAL MP3 DEPENDENCY)
@@ -313,10 +315,23 @@ export interface AuthUserSession {
   email?: string;
   roomPin?: string;
   avatar: CharacterAvatar;
+  appearance?: ChibiAppearanceDNA;
   drunkArchetype: string;
   declaredTolerance: number;
   coins: number;
   title: string;
+  /** Roles and permissions from the `roles` / `user_roles` collections (re-checked server-side). */
+  access?: UserAccess;
+}
+
+const CHARACTER_CREATOR_PENDING_KEY = 'tram_nhau_character_creator_pending_username';
+
+function markCharacterCreatorPending(username: string) {
+  try {
+    localStorage.setItem(CHARACTER_CREATOR_PENDING_KEY, username);
+  } catch {
+    // The current sign-up flow can continue even when browser storage is unavailable.
+  }
 }
 
 export interface AuthPanelModalProps {
@@ -578,10 +593,12 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
           username: data.user.username,
           email: data.user.email,
           avatar: data.user.avatar || 'dog',
+          appearance: data.user.appearance,
           drunkArchetype: data.user.drunkArchetype || 'TRIET_GIA',
           declaredTolerance: data.user.declaredTolerance || 50,
           coins: data.user.coins || 740,
           title: data.user.title || 'Khách Quen Bờ Kè',
+          access: normalizeUserAccess(data.user.access),
         };
 
         sfx.playBottleCapOpen();
@@ -629,8 +646,10 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
           declaredTolerance: data.user.declaredTolerance || signupTolerance,
           coins: data.user.coins || 740,
           title: data.user.title || 'Tấm Chiếu Mới',
+          access: normalizeUserAccess(data.user.access),
         };
 
+        markCharacterCreatorPending(session.username);
         sfx.playBottleCapOpen();
         setTimeout(() => sfx.playClink(), 180);
         setLastSessionData(session);
@@ -670,6 +689,7 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
           title: 'Khách Nhậu Vãng Lai',
         };
 
+        markCharacterCreatorPending(session.username);
         sfx.playBottleCapOpen();
         setTimeout(() => sfx.playClink(), 180);
         setLastSessionData(session);
@@ -1581,13 +1601,19 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
           <div className="w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 border-4 border-amber-400 rounded-3xl p-6 text-center shadow-[0_0_60px_rgba(245,158,11,0.85)] animate-bounce">
             <div className="text-5xl mb-2">🍻🎉</div>
             <span className="text-[10px] font-black uppercase bg-emerald-400 text-slate-950 px-3 py-0.5 rounded-full">
-              ĐÃ ĐÓNG MỘC HỘ CHIẾU TỬU LƯỢNG
+              {lastSessionData.authMode === 'SIGNUP'
+                ? 'BƯỚC 1/2 • TẠO TÀI KHOẢN XONG'
+                : lastSessionData.authMode === 'GUEST'
+                ? 'BƯỚC 1/2 • TẠO PHIÊN KHÁCH XONG'
+                : 'ĐÃ ĐÓNG MỘC HỘ CHIẾU TỬU LƯỢNG'}
             </span>
             <h2 className="text-2xl font-black text-white mt-2">
               CHÀO MỪNG {lastSessionData.username.toUpperCase()}!
             </h2>
             <p className="text-xs text-amber-200 mt-1">
-              Ghế nhựa đỏ số #1 đã sẵn sàng! Bà Chủ Quán Tư Đực tặng bạn quà nhập tiệc:
+              {lastSessionData.authMode !== 'LOGIN'
+                ? `${lastSessionData.authMode === 'GUEST' ? 'Phiên khách' : 'Tài khoản'} đã sẵn sàng! Tiếp theo, hãy tạo ngoại hình nhân vật của bạn.`
+                : 'Ghế nhựa đỏ số #1 đã sẵn sàng! Bà Chủ Quán Tư Đực tặng bạn quà nhập tiệc:'}
             </p>
 
             <div className="grid grid-cols-2 gap-2.5 my-4">
@@ -1610,7 +1636,9 @@ export const AuthPanelModal: React.FC<AuthPanelModalProps> = ({
               }}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500 text-slate-950 font-black text-sm shadow-lg hover:scale-105 transition"
             >
-              🍺 NGỒI VÀO GHẾ NHỰA & HÔ "1, 2, 3 DZÔ!"
+              {lastSessionData.authMode !== 'LOGIN'
+                ? '🎨 TIẾP TỤC: TẠO NHÂN VẬT'
+                : '🍺 NGỒI VÀO GHẾ NHỰA & HÔ "1, 2, 3 DZÔ!"'}
             </button>
           </div>
         </div>

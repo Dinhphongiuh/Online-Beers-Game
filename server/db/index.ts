@@ -10,11 +10,12 @@ import { gamesRepo } from './repositories/games.ts';
 import { usersRepo } from './repositories/users.ts';
 import { friendsRepo } from './repositories/friends.ts';
 import { npcsRepo } from './repositories/npcs.ts';
+import { rolesRepo } from './repositories/roles.ts';
 
 export { initMongo, isDuplicateKeyError } from './connection.ts';
 export { hashPassword, verifyPassword } from './password.ts';
 export * from './models/index.ts';
-export { roomsRepo, playersRepo, receiptsRepo, gamesRepo, usersRepo, friendsRepo, npcsRepo };
+export { roomsRepo, playersRepo, receiptsRepo, gamesRepo, usersRepo, friendsRepo, npcsRepo, rolesRepo };
 
 export const dbService = {
   getStatus: getMongoStatus,
@@ -25,4 +26,5 @@ export const dbService = {
   ...usersRepo,
   ...friendsRepo,
   ...npcsRepo,
+  ...rolesRepo,
 };

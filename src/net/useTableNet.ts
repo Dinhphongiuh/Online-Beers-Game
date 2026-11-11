@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NetChatMessage, NetPlayer, TableEventEnvelope } from '../../shared/tableNet';
+import type { ChibiAppearanceDNA } from '../../shared/appearance';
 import type { Player } from '../game/types';
 import { TableNetClient, takeTableClient, type NetConnectionState, type NetPose } from './tableClient';
 
@@ -44,6 +45,7 @@ export function toGamePlayer(p: NetPlayer, seatIndex: number): Player {
     clothing: p.clothing as Player['clothing'],
     hat: p.hat as Player['hat'],
     glassType: p.glassType as Player['glassType'],
+    appearance: p.appearance,
     alcoholLevel: p.alcohol,
     stamina: 100,
     seatIndex,
@@ -58,7 +60,7 @@ export function toGamePlayer(p: NetPlayer, seatIndex: number): Player {
 
 export function useTableNet(
   roomCode: string,
-  profile: { name: string; avatar: string; clothing: string; hat: string; glassType: string },
+  profile: { name: string; avatar: string; clothing: string; hat: string; glassType: string; appearance?: ChibiAppearanceDNA },
   handlers: {
     onEvent?: (e: TableEventEnvelope) => void;
     onPlayerJoined?: (p: NetPlayer) => void;

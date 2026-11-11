@@ -3,14 +3,30 @@ import App, { INITIAL_DISHES, INITIAL_PLAYERS } from './App';
 import { MainMenu } from './lobby/MainMenu';
 import { LobbyConfig } from './lobby/lobbyData';
 import { GraphicsQuality } from './lobby/LobbyPanels';
+import { PERMISSIONS, hasPermission, normalizeUserAccess } from '../shared/roles';
 import { AuthPanelModal, AuthUserSession } from './components/AuthPanelModal';
 import { ROUTES, loginPathFor, navigate, safeNextPath, useLocation } from './router';
 import { usePresenceHeartbeat } from './net/socialApi';
 import { useSocialEvents, useSocialSocket } from './net/socialSocket';
 import { socialEventToast } from '../shared/social';
+import { DEFAULT_CHIBI_APPEARANCE, type ChibiAppearanceDNA } from '../shared/appearance';
 
 type AuthStatus = 'checking' | 'authed' | 'anon';
 const TOKEN_KEY = 'tram_nhau_auth_token';
+const CHARACTER_CREATOR_PENDING_KEY = 'tram_nhau_character_creator_pending_username';
+const characterCreatorDoneKey = (username: string) =>
+  `tram_nhau_character_creator_done:${username.trim().toLowerCase()}`;
+
+function hasPendingCharacterCreator(username: string) {
+  try {
+    return (
+      localStorage.getItem(CHARACTER_CREATOR_PENDING_KEY) === username &&
+      localStorage.getItem(characterCreatorDoneKey(username)) !== '1'
+    );
+  } catch {
+    return false;
+  }
+}
 
 type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 
@@ -32,6 +48,7 @@ export default function Root() {
             clothing: INITIAL_PLAYERS[0].clothing,
             hat: INITIAL_PLAYERS[0].hat,
             glassType: INITIAL_PLAYERS[0].glassType,
+            appearance: DEFAULT_CHIBI_APPEARANCE,
           },
           squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
           roomCode: '4089',
@@ -47,6 +64,7 @@ export default function Root() {
   );
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
   const [userSession, setUserSession] = useState<AuthUserSession | null>(null);
+  const [needsCharacterSetup, setNeedsCharacterSetup] = useState(false);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
   const [authStatus, setAuthStatus] = useState<AuthStatus>(() =>
     localStorage.getItem(TOKEN_KEY) ? 'checking' : 'anon'
@@ -75,11 +93,14 @@ export default function Root() {
           username: data.user.username,
           email: data.user.email,
           avatar: data.user.avatar || 'dog',
+          appearance: data.user.appearance,
           drunkArchetype: data.user.drunkArchetype || 'TRIET_GIA',
           declaredTolerance: data.user.declaredTolerance || 50,
           coins: data.user.coins || 740,
           title: data.user.title || 'Khách Quen Bờ Kè',
+          access: normalizeUserAccess(data.user.access),
         });
+        setNeedsCharacterSetup(hasPendingCharacterCreator(data.user.username));
         setAuthStatus('authed');
       })
       .catch(() => setAuthStatus('anon'));
@@ -128,8 +149,32 @@ export default function Root() {
   // Single source of truth for login state: lobby and match only show Logout once signed in
   const handleAuthSuccess = useCallback((session: AuthUserSession) => {
     setUserSession(session);
+    if (session.authMode !== 'LOGIN') {
+      try {
+        localStorage.setItem(CHARACTER_CREATOR_PENDING_KEY, session.username);
+      } catch {
+        // The immediate onboarding still works even if browser storage is unavailable.
+      }
+      setNeedsCharacterSetup(true);
+    } else {
+      setNeedsCharacterSetup(hasPendingCharacterCreator(session.username));
+    }
     setShowAuthGate(false);
     setAuthStatus('authed'); // the guard sends /login → ?next (or the menu)
+  }, []);
+
+  const saveCharacterAppearance = useCallback((appearance: ChibiAppearanceDNA) => {
+    setUserSession((current) => (current ? { ...current, appearance } : current));
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return;
+    void fetch('/api/auth/appearance', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ appearance }),
+    }).catch(() => null);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -155,6 +200,7 @@ export default function Root() {
       ...INITIAL_PLAYERS[0],
       name: userSession.username,
       avatar: userSession.avatar,
+      appearance: userSession.appearance,
       title: userSession.title || INITIAL_PLAYERS[0].title,
       coins: userSession.coins || INITIAL_PLAYERS[0].coins + 500,
     };
@@ -200,8 +246,21 @@ export default function Root() {
           dishes={INITIAL_DISHES}
           onStart={handleStart}
           isLoggedIn={!!userSession}
+          openCharacterCreator={needsCharacterSetup}
+          onCharacterCreatorComplete={(appearance) => {
+            try {
+              localStorage.setItem(characterCreatorDoneKey(userSession?.username || ''), '1');
+              localStorage.removeItem(CHARACTER_CREATOR_PENDING_KEY);
+            } catch {
+              // Keep the current flow complete even if browser storage is unavailable.
+            }
+            saveCharacterAppearance(appearance);
+            setNeedsCharacterSetup(false);
+          }}
+          onCharacterAppearanceSave={saveCharacterAppearance}
           onAuthSuccess={handleAuthSuccess}
           onLogout={handleLogout}
+          canUseDevMode={hasPermission(userSession?.access, PERMISSIONS.DEV_MODE)}
         />
       )}
 

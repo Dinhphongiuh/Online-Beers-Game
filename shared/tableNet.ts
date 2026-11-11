@@ -1,3 +1,5 @@
+import type { ChibiAppearanceDNA } from './appearance';
+
 /**
  * Realtime protocol for one drinking table (Colyseus room "nhau_table").
  *
@@ -37,6 +39,7 @@ export interface TableJoinOptions {
   clothing: string;
   hat: string;
   glassType: string;
+  appearance?: ChibiAppearanceDNA;
   /** Host opening the table: the venue/rules everyone will play with. */
   setup?: TableSetup;
 }
@@ -57,6 +60,7 @@ export interface NetPlayer {
   clothing: string;
   hat: string;
   glassType: string;
+  appearance: ChibiAppearanceDNA;
   alcohol: number;
   passedOut: boolean;
   drinks: number;

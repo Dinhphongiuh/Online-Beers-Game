@@ -14,11 +14,24 @@ const mongoUri = process.env.MONGODB_URI;
 let lastMongoError = mongoUri ? 'Đang kết nối…' : 'Chưa cấu hình MONGODB_URI';
 const RETRY_MS = 5000;
 
+let startupTasks: Promise<unknown> = Promise.resolve();
+
 mongoose.connection.on('connected', () => {
   lastMongoError = '';
   console.log('✅ [MongoDB] Connected');
-  backfillUsernameKeys().catch((err) => console.error('❌ [MongoDB] usernameKey backfill failed:', err));
+  startupTasks = Promise.all([
+    backfillUsernameKeys().catch((err) => console.error('❌ [MongoDB] usernameKey backfill failed:', err)),
+    // Lazy import: the roles repository imports requireMongo from this module.
+    import('./repositories/roles.ts')
+      .then(({ rolesRepo }) => rolesRepo.ensureSystemRoles())
+      .catch((err) => console.error('❌ [MongoDB] Seeding system roles failed:', err)),
+  ]);
 });
+
+/** Resolves once the on-connect maintenance (backfill, role seeding) is done; CLI scripts await it before exiting. */
+export function whenStartupTasksDone() {
+  return startupTasks;
+}
 
 /**
  * Give accounts created before usernameKey existed their key, so uniqueness covers them too.

@@ -1,5 +1,6 @@
 /** Accounts (registered + guest). */
 import mongoose, { Schema, Document } from 'mongoose';
+import type { ChibiAppearanceDNA } from '../../../shared/appearance.ts';
 
 export interface IUser extends Document {
   userId: string;
@@ -9,6 +10,7 @@ export interface IUser extends Document {
   email?: string;
   passwordHash?: string;
   avatar: string;
+  appearance?: ChibiAppearanceDNA;
   title: string;
   clothing: string;
   hat: string;
@@ -40,6 +42,7 @@ const UserSchema = new Schema<IUser>(
     email: { type: String, sparse: true, index: true },
     passwordHash: { type: String },
     avatar: { type: String, default: 'dog' },
+    appearance: { type: Schema.Types.Mixed },
     title: { type: String, default: 'Tấm Chiếu Mới' },
     clothing: { type: String, default: 'tanktop_red' },
     hat: { type: String, default: 'none' },

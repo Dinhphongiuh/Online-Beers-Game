@@ -13,6 +13,7 @@ import { commuteRouter } from './routes/commute.ts';
 import { aiRouter } from './routes/ai.ts';
 import { socialRouter } from './routes/social.ts';
 import { npcsRouter } from './routes/npcs.ts';
+import { devRouter } from './routes/dev.ts';
 
 export function createApp() {
   const app = express();
@@ -32,6 +33,7 @@ export function createApp() {
   app.use(aiRouter);
   app.use(socialRouter);
   app.use(npcsRouter);
+  app.use(devRouter);
 
   // Database outages surface as 503 (never as fake empty data)
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {

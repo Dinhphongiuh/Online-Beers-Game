@@ -1,3 +1,4 @@
+import { DevModePanel } from '../dev/DevModePanel';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff, Settings, Volume2, VolumeX, Users, MessageSquare, Send, X, LogOut } from 'lucide-react';
 import { initThreeScene, SceneController, LOBBY_SEAT_COUNT } from '../game/threeScene';
@@ -42,6 +43,32 @@ import { getNetPlayerId } from '../net/useTableNet';
 import type { NetPlayer, TableInfo, TableSetup } from '../../shared/tableNet';
 import { TableWaitingRoom, type WaitingFriend } from './TableWaitingRoom';
 import { presenceNote, socialEventToast, type CustomNpc } from '../../shared/social';
+import {
+  DEFAULT_HUMAN_APPEARANCE,
+  normalizeChibiAppearance,
+  type ChibiAppearanceDNA,
+} from '../../shared/appearance';
+
+const CHARACTER_APPEARANCE_STORAGE_PREFIX = 'tram_nhau_character_appearance_v2:';
+const LEGACY_CHARACTER_APPEARANCE_STORAGE_KEY = 'tram_nhau_character_appearance_v2';
+const LEGACY_CHIBI_APPEARANCE_STORAGE_KEY = 'tram_nhau_chibi_appearance_v1';
+
+function readSavedCharacterAppearance(username: string, serverAppearance?: ChibiAppearanceDNA) {
+  try {
+    const stored = serverAppearance
+      ? null
+      : localStorage.getItem(`${CHARACTER_APPEARANCE_STORAGE_PREFIX}${username.trim().toLowerCase()}`) ||
+        localStorage.getItem(LEGACY_CHARACTER_APPEARANCE_STORAGE_KEY) ||
+        localStorage.getItem(LEGACY_CHIBI_APPEARANCE_STORAGE_KEY);
+    return {
+      ...DEFAULT_HUMAN_APPEARANCE,
+      ...normalizeChibiAppearance(serverAppearance || JSON.parse(stored || 'null')),
+      characterStyle: 'human' as const,
+    };
+  } catch {
+    return { ...DEFAULT_HUMAN_APPEARANCE };
+  }
+}
 
 /** Notes for the built-in regulars in the NPC tab. */
 const BUILTIN_NPC_NOTES: Record<string, string> = {
@@ -78,7 +105,7 @@ const npcToleranceNote = (n: CustomNpc) =>
     n.catchphrase ? ` • "${n.catchphrase}"` : ''
   }`;
 
-type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite' | 'auth';
+type PanelId = 'none' | 'host' | 'join' | 'wardrobe' | 'profile' | 'settings' | 'invite' | 'auth' | 'dev';
 
 interface SquadMember {
   id: string;
@@ -118,8 +145,14 @@ export interface MainMenuProps {
   onStart: (config: LobbyConfig, graphics: GraphicsQuality) => void;
   /** Signed in: hide every login/sign-up entry point and only offer Logout. */
   isLoggedIn: boolean;
+  /** Opens the character creator immediately after successful account creation. */
+  openCharacterCreator?: boolean;
+  onCharacterCreatorComplete?: (appearance: ChibiAppearanceDNA) => void;
+  onCharacterAppearanceSave?: (appearance: ChibiAppearanceDNA) => void;
   onAuthSuccess: (session: AuthUserSession) => void;
   onLogout: () => void;
+  /** Accounts with the dev_mode.access permission see the Dev Mode entry. */
+  canUseDevMode?: boolean;
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({
@@ -128,8 +161,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   dishes,
   onStart,
   isLoggedIn,
+  openCharacterCreator = false,
+  onCharacterCreatorComplete,
+  onCharacterAppearanceSave,
   onAuthSuccess,
   onLogout,
+  canUseDevMode = false,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
@@ -145,16 +182,35 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
   // ---- Player & table setup ----
   const [name, setName] = useState(isLoggedIn ? userTemplate.name : 'Bợm Nhậu');
-  // The session can be restored after the lobby mounts (token check), so follow it
-  useEffect(() => {
-    if (isLoggedIn) setName(userTemplate.name);
-  }, [isLoggedIn, userTemplate.name]);
-  const [skin, setSkin] = useState<LobbySkin>({
+  const [skin, setSkin] = useState<LobbySkin>(() => ({
     avatar: userTemplate.avatar,
     clothing: userTemplate.clothing,
     hat: userTemplate.hat,
     glassType: userTemplate.glassType,
-  });
+    appearance: readSavedCharacterAppearance(userTemplate.name, userTemplate.appearance),
+  }));
+  // The session can be restored after the lobby mounts (token check), so follow it
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    setName(userTemplate.name);
+    setSkin((current) => ({
+      ...current,
+      avatar: userTemplate.avatar,
+      appearance: readSavedCharacterAppearance(userTemplate.name, userTemplate.appearance),
+    }));
+  }, [isLoggedIn, userTemplate.name, userTemplate.avatar, userTemplate.appearance]);
+  const [previewAlcohol, setPreviewAlcohol] = useState(0);
+  useEffect(() => {
+    if (!isLoggedIn || !userTemplate.name) return;
+    try {
+      localStorage.setItem(
+        `${CHARACTER_APPEARANCE_STORAGE_PREFIX}${userTemplate.name.trim().toLowerCase()}`,
+        JSON.stringify(skin.appearance)
+      );
+    } catch {
+      // Keep the editor usable when browser storage is disabled.
+    }
+  }, [isLoggedIn, userTemplate.name, skin.appearance]);
   const [squad, setSquad] = useState<SquadMember[]>([]);
   const [ready, setReady] = useState<Record<string, boolean>>({});
   const [seatedIds, setSeatedIds] = useState<string[]>(['user']);
@@ -167,7 +223,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [hostName, setHostName] = useState<string | null>(null);
 
   // ---- UI state ----
-  const [panel, setPanel] = useState<PanelId>('none');
+  const [panel, setPanel] = useState<PanelId>(openCharacterCreator ? 'wardrobe' : 'none');
   const [inviteSeat, setInviteSeat] = useState<number | null>(null);
   const [volume, setVolume] = useState(sound.getMasterVolume());
   const [graphics, setGraphics] = useState<GraphicsQuality>('high');
@@ -180,6 +236,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   const [pops, setPops] = useState<ReactionPop[]>([]);
   // ---- Realtime table: Bước 1 chọn quán → Bước 2 phòng chờ → everyone starts together ----
   const [tableNet, setTableNet] = useState<TableNetClient | null>(null);
+
+  useEffect(() => {
+    if (!openCharacterCreator) return;
+    setPreviewAlcohol(0);
+    setPanel('wardrobe');
+  }, [openCharacterCreator]);
   const [netConn, setNetConn] = useState<NetConnectionState>('idle');
   const [netInfo, setNetInfo] = useState<TableInfo | null>(null);
   const [netPlayers, setNetPlayers] = useState<NetPlayer[]>([]);
@@ -258,7 +320,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       name,
       ...skin,
       seatIndex: 0,
-      alcoholLevel: 0,
+      alcoholLevel: panel === 'wardrobe' ? previewAlcohol : 0,
       isPassedOut: false,
       faceDoodles: [],
     };
@@ -271,7 +333,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       })
       .filter((p): p is Player => !!p);
     return [me, ...members];
-  }, [userTemplate, name, skin, squad, allNpcs]);
+  }, [userTemplate, name, skin, squad, allNpcs, panel, previewAlcohol]);
 
   const playerBySeat = useMemo(() => {
     const m = new Map<number, Player>();
@@ -721,6 +783,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
     { id: 'join', icon: '🔢', label: 'Nhập Mã Bàn', sub: 'Join by Code' },
     { id: 'wardrobe', icon: '👕', label: 'Tủ Đồ Vỉa Hè', sub: 'Wardrobe' },
     { id: 'profile', icon: '📜', label: 'Hộ Chiếu Tửu Lượng', sub: 'Profile & Rank' },
+    ...(canUseDevMode ? [{ id: 'dev' as PanelId, icon: '🧪', label: 'Dev Mode', sub: 'Admin / Tester' }] : []),
   ];
 
   const openPanel = (id: PanelId) => {
@@ -896,7 +959,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             className="flex items-center gap-2 rounded-2xl bg-zinc-950/85 border border-amber-500/40 pl-1 pr-3 py-1 shadow-lg backdrop-blur-md cursor-pointer hover:border-amber-400 text-left"
           >
             <span className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-orange-500 flex items-center justify-center text-xl border-2 border-amber-200">
-              {AVATAR_ICON[skin.avatar]}
+              {skin.appearance.characterStyle === 'human' ? '🧑' : AVATAR_ICON[skin.avatar]}
             </span>
             <span className="min-w-0">
               <span className="block text-[13px] font-black truncate max-w-[110px] sm:max-w-[180px]">{name || 'Bợm Nhậu'}</span>
@@ -1187,11 +1250,20 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         <WardrobePanel
           skin={skin}
           name={name}
+          onboarding={openCharacterCreator}
           onNameChange={setName}
           onChange={setSkin}
+          previewAlcohol={previewAlcohol}
+          onPreviewAlcohol={setPreviewAlcohol}
           onClose={() => {
             sound.playBottleOpen();
             setPanel('none');
+            if (openCharacterCreator) {
+              onCharacterCreatorComplete?.(skin.appearance);
+              showToast('🎨 Ngoại hình đã lưu. Mời vào sảnh chọn bàn nhậu!');
+            } else {
+              onCharacterAppearanceSave?.(skin.appearance);
+            }
           }}
         />
       )}
@@ -1199,6 +1271,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         <ProfilePanel
           name={name || 'Bợm Nhậu'}
           avatar={skin.avatar}
+          isHuman={skin.appearance.characterStyle === 'human'}
           coins={userTemplate.coins}
           toastCount={userTemplate.drinksCount + 8}
           onClose={() => setPanel('none')}
@@ -1315,6 +1388,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
         </div>
       )}
 
+      {panel === 'dev' && canUseDevMode && <DevModePanel onClose={() => setPanel('none')} />}
+
       {panel === 'auth' && !isLoggedIn && (
         <AuthPanelModal
           isOpen={true}
@@ -1323,8 +1398,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             onAuthSuccess(session);
             setName(session.username);
             setSkin((prev) => ({ ...prev, avatar: session.avatar }));
-            setPanel('none');
-            showToast(`🍻 Chào mừng ${session.username}! Đã nhận +500 Nắp Bia Tân Thủ!`);
+            const shouldCreateCharacter = session.authMode !== 'LOGIN';
+            setPanel(shouldCreateCharacter ? 'wardrobe' : 'none');
+            showToast(
+              shouldCreateCharacter
+                ? `🍻 Chào mừng ${session.username}! Tạo nhân vật của bạn để bắt đầu nha.`
+                : `🍻 Chào mừng ${session.username}! Đã nhận +500 Nắp Bia Tân Thủ!`
+            );
           }}
         />
       )}

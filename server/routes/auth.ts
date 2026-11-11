@@ -4,6 +4,9 @@ import { Router } from 'express';
 import { dbService, isDuplicateKeyError, verifyPassword } from '../db/index.ts';
 import { redis } from '../redis.ts';
 import { sendServerError } from '../http/respond.ts';
+import { resolveUserAccess } from '../http/roles.ts';
+import { NO_ACCESS } from '../../shared/roles.ts';
+import { normalizeChibiAppearance } from '../../shared/appearance.ts';
 import {
   firstError,
   validateEmail,
@@ -76,7 +79,7 @@ authRouter.post('/api/auth/register', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: safeUser,
+      user: { ...safeUser, access: await resolveUserAccess(newUser) },
       message: 'Đăng ký thành công! Đã cấp Hộ Chiếu Tửu Lượng.',
     });
   } catch (error: any) {
@@ -163,7 +166,7 @@ authRouter.post('/api/auth/login', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: safeUser,
+      user: { ...safeUser, access: await resolveUserAccess(user) },
       message: 'Đăng nhập thành công! Mời đại ca vào bàn.',
     });
   } catch (error) {
@@ -217,7 +220,7 @@ authRouter.post('/api/auth/guest', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: guestUser,
+      user: { ...guestUser, access: NO_ACCESS },
       message: 'Đã vào bàn nhậu với tư cách khách vãng lai!',
     });
   } catch (error) {
@@ -244,13 +247,46 @@ authRouter.get('/api/auth/me', async (req, res) => {
     const user = await dbService.findUserById(session.userId);
     if (user) {
       const { passwordHash: _, ...safeUser } = user;
-      return res.json({ authenticated: true, user: safeUser });
+      return res.json({ authenticated: true, user: { ...safeUser, access: await resolveUserAccess(user) } });
     }
 
-    return res.json({ authenticated: true, user: session });
+    return res.json({ authenticated: true, user: { ...session, access: NO_ACCESS } });
   } catch (error) {
     console.error('Auth verification error:', error);
     sendServerError(res, error, 'Lỗi xác thực phiên');
+  }
+});
+
+// POST /api/auth/appearance - Save the signed-in player's human character creator settings
+authRouter.post('/api/auth/appearance', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Chưa đăng nhập' });
+  }
+
+  try {
+    const token = authHeader.substring(7);
+    const sessionRaw = await redis.get(`session:${token}`);
+    if (!sessionRaw) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn hoặc không tồn tại' });
+    }
+
+    const session = JSON.parse(sessionRaw);
+    if (typeof session.userId !== 'string' || !session.userId) {
+      return res.status(401).json({ error: 'Phiên đăng nhập không hợp lệ' });
+    }
+
+    const appearance = {
+      ...normalizeChibiAppearance(req.body?.appearance),
+      characterStyle: 'human' as const,
+    };
+    const user = await dbService.updateUser(session.userId, { appearance });
+    if (!user) return res.status(404).json({ error: 'Không tìm thấy hồ sơ người chơi' });
+
+    res.json({ success: true, appearance: user.appearance });
+  } catch (error) {
+    console.error('Character appearance save error:', error);
+    sendServerError(res, error, 'Không lưu được ngoại hình nhân vật');
   }
 });
 

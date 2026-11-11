@@ -28,6 +28,8 @@ import {
   createYellowPeePuddle,
 } from './proceduralModels';
 import { createChibiCharacter, CharacterRig, CheersAnimPhase } from './characterModel';
+import { chibiAppearanceKey } from '../../shared/appearance';
+import { createVrmHumanCharacter } from './vrmHumanRig';
 import { createStreetBackdrop, StreetBackdrop } from './environment';
 import { createFoodPlatter, createTableClutter } from './foodModels';
 import { createDrunkVisionPipeline, DrunkVisionPipeline } from './drunkVision';
@@ -328,6 +330,8 @@ export function initThreeScene(): SceneController {
   let lastCommuteStage = commute3DState.stage;
   const lobbyEmptyStools: THREE.Group[] = [];
   let wardrobeSet: THREE.Group | null = null;
+  /** The wardrobe user is a full-size human: stand them on the floor and frame the camera higher. */
+  let wardrobeUserIsHuman = false;
   const lobbyWaypoints = new Map<string, { x: number; z: number }[]>();
   const lobbyReactions = new Map<string, { kind: LobbyReaction; t: number; dur: number }>();
   const _projVec = new THREE.Vector3();
@@ -391,6 +395,26 @@ export function initThreeScene(): SceneController {
 
   // Player rigs mapped by player id
   const playerRigs = new Map<string, { rig: CharacterRig; stool: THREE.Group; player: Player }>();
+  function createPlayerCharacter(player: Player) {
+    // Human players are VRoid (VRM) characters; the model streams in and the
+    // rig shows its chibi stand-in until then (see vrmHumanRig.ts).
+    if (player.appearance?.characterStyle === 'human') {
+      return createVrmHumanCharacter(
+        player.avatar,
+        player.clothing,
+        player.hat,
+        player.glassType,
+        player.appearance
+      );
+    }
+    return createChibiCharacter(
+      player.avatar,
+      player.clothing,
+      player.hat,
+      player.glassType,
+      player.appearance
+    );
+  }
 
   // State
   let userDrunkLevel = 0;
@@ -1119,6 +1143,7 @@ export function initThreeScene(): SceneController {
 
     // The "barber chair" is just another red plastic stool
     const barberStool = createPlasticStool(0xdc2626);
+    barberStool.name = 'WardrobeBarberStool';
     barberStool.rotation.y = Math.PI;
     group.add(barberStool);
 
@@ -1166,9 +1191,19 @@ export function initThreeScene(): SceneController {
     delta: number,
     rawDelta: number,
     time: number,
-    extraState: { isWalkingToTree?: boolean }
+    extraState: { isWalkingToTree?: boolean; isStanding?: boolean }
   ) {
     const inWardrobe = player.isUser && lobbyMode === 'wardrobe';
+    extraState.isStanding = inWardrobe;
+    const isHumanRig = player.appearance?.characterStyle === 'human';
+    if (player.isUser) {
+      wardrobeUserIsHuman = isHumanRig;
+      // A standing human would stand straight through the barber stool.
+      const barberStool = wardrobeSet?.getObjectByName('WardrobeBarberStool');
+      if (barberStool) barberStool.visible = !isHumanRig;
+      // No beer mug while posing in front of the mirror.
+      if (isHumanRig) rig.mugHolder.visible = !inWardrobe;
+    }
     const tx = inWardrobe ? WARDROBE_SPOT.x : stool.position.x;
     const tz = inWardrobe ? WARDROBE_SPOT.z : stool.position.z;
     const route = lobbyWaypoints.get(player.id);
@@ -1223,7 +1258,9 @@ export function initThreeScene(): SceneController {
       }
     } else if (inWardrobe && dist <= 0.06) {
       // Showing off the outfit in the mirror
-      rig.rightArm.rotation.set(2.6, 0, -0.9);
+      // Humans stand relaxed with arms down so the outfit reads clearly;
+      // the chibi keeps its cheerful wave.
+      if (!isHumanRig) rig.rightArm.rotation.set(2.6, 0, -0.9);
       rig.head.rotation.z = Math.sin(time * 2) * 0.1;
     }
 
@@ -1917,6 +1954,7 @@ export function initThreeScene(): SceneController {
         dAngle = Math.atan2(Math.sin(dAngle), Math.cos(dAngle));
         rig.root.rotation.y += dAngle * Math.min(1, rawDelta * 12);
         extraState.isWalkingToTree = pose.moving;
+        extraState.isStanding = pose.roaming;
         rig.update(delta, player.alcoholLevel, player.isPassedOut, isCheersing, undefined, extraState);
       } else {
         // Check if this NPC is currently being dragged/carried by the user ("The Wingman Carry")
@@ -2061,8 +2099,14 @@ export function initThreeScene(): SceneController {
         }
       });
       if (lobbyMode === 'wardrobe') {
-        _camTargetPos.set(WARDROBE_SPOT.x - (wide ? 0.6 : 0), 1.55, WARDROBE_SPOT.z + 3.7);
-        _camLookAt.set(WARDROBE_SPOT.x - (wide ? 1.05 : 0), wide ? 0.85 : 0.55, WARDROBE_SPOT.z - 0.2);
+        if (wardrobeUserIsHuman) {
+          // Full-body framing for a ~1.6 m human instead of the knee-high chibi.
+          _camTargetPos.set(WARDROBE_SPOT.x - (wide ? 0.45 : 0), 1.35, WARDROBE_SPOT.z + 3.8);
+          _camLookAt.set(WARDROBE_SPOT.x - (wide ? 0.75 : 0), 0.85, WARDROBE_SPOT.z - 0.2);
+        } else {
+          _camTargetPos.set(WARDROBE_SPOT.x - (wide ? 0.6 : 0), 1.55, WARDROBE_SPOT.z + 3.7);
+          _camLookAt.set(WARDROBE_SPOT.x - (wide ? 1.05 : 0), wide ? 0.85 : 0.55, WARDROBE_SPOT.z - 0.2);
+        }
         camera.fov = THREE.MathUtils.damp(camera.fov, wide ? 40 : 52, 4, rawDelta);
       } else {
         const drift = Math.sin(time * 0.17) * 0.35;
@@ -2356,12 +2400,26 @@ export function initThreeScene(): SceneController {
         const z = Math.sin(angle) * tableRadius;
 
         let entry = playerRigs.get(p.id);
-        if (
-          entry &&
+        const appearanceChanged =
+          !!entry && chibiAppearanceKey(entry.player.appearance) !== chibiAppearanceKey(p.appearance);
+        const rigIdentityChanged =
+          !!entry &&
           (entry.player.avatar !== p.avatar ||
             entry.player.clothing !== p.clothing ||
             entry.player.hat !== p.hat ||
-            entry.player.glassType !== p.glassType)
+            entry.player.glassType !== p.glassType);
+        const canUpdateHumanInPlace =
+          !!entry &&
+          !rigIdentityChanged &&
+          appearanceChanged &&
+          p.appearance?.characterStyle === 'human' &&
+          !!entry.rig.setAppearance;
+        if (canUpdateHumanInPlace && entry && p.appearance) {
+          entry.rig.setAppearance?.(p.appearance);
+        }
+        if (
+          entry &&
+          (rigIdentityChanged || (appearanceChanged && !canUpdateHumanInPlace))
         ) {
           scene!.remove(entry.rig.root);
           scene!.remove(entry.stool);
@@ -2371,7 +2429,7 @@ export function initThreeScene(): SceneController {
 
         if (!entry) {
           const stool = createPlasticStool(idx % 2 === 0 ? 0xdc2626 : 0x0284c7);
-          const rig = createChibiCharacter(p.avatar, p.clothing, p.hat, p.glassType);
+          const rig = createPlayerCharacter(p);
           rig.root.userData = { playerId: p.id, isPassedOut: p.isPassedOut };
           rig.root.position.set(x, 0, z);
           rig.root.rotation.y = -angle - Math.PI / 2;
@@ -2424,7 +2482,8 @@ export function initThreeScene(): SceneController {
           p.alcoholLevel,
           p.isUser,
           p.avatar,
-          specialStatus
+          specialStatus,
+          p.appearance?.characterStyle === 'human'
         );
       });
 

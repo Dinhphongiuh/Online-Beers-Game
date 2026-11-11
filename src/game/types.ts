@@ -1,3 +1,5 @@
+import type { ChibiAppearanceDNA } from '../../shared/appearance';
+
 export type CharacterAvatar = 'dog' | 'cat' | 'panda' | 'duck' | 'bear' | 'hamster';
 
 export type ClothingType = 'tanktop_red' | 'tanktop_white' | 'floral_shirt' | 'gold_chain';
@@ -17,6 +19,7 @@ export interface Player {
   /** A real human at the same table over the network (Colyseus), not an NPC. */
   isRemote?: boolean;
   avatar: CharacterAvatar;
+  appearance?: ChibiAppearanceDNA;
   clothing: ClothingType;
   hat: HatType;
   glassType: GlassType;

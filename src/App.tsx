@@ -545,6 +545,7 @@ export default function App({
       clothing: userPlayer.clothing,
       hat: userPlayer.hat,
       glassType: userPlayer.glassType,
+      appearance: userPlayer.appearance,
     },
     {
       onEvent: (e) => handleRemoteTableEvent(e),

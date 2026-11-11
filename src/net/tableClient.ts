@@ -20,6 +20,7 @@ import {
   type TableJoinOptions,
   type TableSetup,
 } from '../../shared/tableNet';
+import { normalizeChibiAppearance } from '../../shared/appearance';
 
 /** 'waiting_host' = guest knocking on a table the host hasn't opened yet (keeps retrying). */
 export type NetConnectionState = 'idle' | 'connecting' | 'waiting_host' | 'online' | 'offline';
@@ -259,6 +260,7 @@ export class TableNetClient {
           clothing: p.clothing,
           hat: p.hat,
           glassType: p.glassType,
+          appearance: normalizeChibiAppearance(safeJson(p.appearance)),
           alcohol: p.alcohol,
           passedOut: p.passedOut,
           drinks: p.drinks,
@@ -289,7 +291,7 @@ export class TableNetClient {
       const rosterKey = list
         .map(
           (p) =>
-            `${p.sessionId}|${p.name}|${p.avatar}|${p.clothing}|${p.hat}|${p.glassType}|${p.alcohol}|${p.passedOut}|${p.drinks}|${p.speaking}|${Math.round(p.voiceLevel * 3)}|${p.ready}|${p.debt}`
+            `${p.sessionId}|${p.name}|${p.avatar}|${p.clothing}|${p.hat}|${p.glassType}|${JSON.stringify(p.appearance)}|${p.alcohol}|${p.passedOut}|${p.drinks}|${p.speaking}|${Math.round(p.voiceLevel * 3)}|${p.ready}|${p.debt}`
         )
         .join(';');
       if (rosterKey !== this.rosterKey) {

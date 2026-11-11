@@ -1,4 +1,5 @@
 import { customNpcPlayerId, type CustomNpc } from '../../shared/social';
+import { DEFAULT_CHIBI_APPEARANCE, type ChibiAppearanceDNA } from '../../shared/appearance';
 import {
   CharacterAvatar,
   ClothingType,
@@ -24,7 +25,10 @@ export interface LobbySkin {
   clothing: ClothingType;
   hat: HatType;
   glassType: GlassType;
+  appearance: ChibiAppearanceDNA;
 }
+
+export { DEFAULT_CHIBI_APPEARANCE };
 
 /** Everything the lobby hands over to the in-game table when "DZÔ!" is pressed. */
 export interface LobbyConfig {

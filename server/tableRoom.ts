@@ -21,6 +21,7 @@ import {
   type TableJoinOptions,
   type TableSetup,
 } from '../shared/tableNet.ts';
+import { normalizeChibiAppearance } from '../shared/appearance.ts';
 
 export const NetPlayerState = schema(
   {
@@ -31,6 +32,7 @@ export const NetPlayerState = schema(
     clothing: t.string(),
     hat: t.string(),
     glassType: t.string(),
+    appearance: t.string(),
     alcohol: t.uint8(),
     passedOut: t.boolean(),
     drinks: t.uint16(),
@@ -231,6 +233,7 @@ export class TableRoom extends Room<{ state: TableRoomState }> {
     p.clothing = str(options.clothing, 24, 'tanktop_white');
     p.hat = str(options.hat, 24, 'none');
     p.glassType = str(options.glassType, 24, 'beer_mug');
+    p.appearance = JSON.stringify(normalizeChibiAppearance(options.appearance));
     p.joinedAt = Date.now();
     p.ready = false;
     this.state.players.set(client.sessionId, p);

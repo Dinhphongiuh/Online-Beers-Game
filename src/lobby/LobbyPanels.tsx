@@ -21,6 +21,12 @@ import { HangoverBook } from '../components/HangoverBook';
 import { PassportCard } from './PassportCard';
 import { getNetPlayerId } from '../net/useTableNet';
 import type { MatchReceipt } from '../../shared/receipts';
+import {
+  CHIBI_SKIN_TONES,
+  DEFAULT_CHIBI_APPEARANCE,
+  DEFAULT_HUMAN_APPEARANCE,
+  HUMAN_SKIN_TONES,
+} from '../../shared/appearance';
 
 // Browsers keep audio locked until the first gesture; don't spam a suspended context on hover.
 let audioUnlocked = false;
@@ -310,28 +316,104 @@ export const JoinCodePanel: React.FC<{
 export const WardrobePanel: React.FC<{
   skin: LobbySkin;
   name: string;
+  onboarding?: boolean;
   onNameChange: (name: string) => void;
   onChange: (skin: LobbySkin) => void;
+  previewAlcohol: number;
+  onPreviewAlcohol: (value: number) => void;
   onClose: () => void;
-}> = ({ skin, name, onNameChange, onChange, onClose }) => {
+}> = ({ skin, name, onboarding = false, onNameChange, onChange, previewAlcohol, onPreviewAlcohol, onClose }) => {
+  const [creatorStep, setCreatorStep] = useState(0);
+  const isHumanCreator = skin.appearance.characterStyle === 'human';
+  // VRoid (VRM) characters: pick the character, then skin, hair & clothes colours.
+  const creatorSteps = ['Nhân vật', 'Da', 'Tóc & đồ', 'Thử độ say'];
+  const updateAppearance = (patch: Partial<LobbySkin['appearance']>) =>
+    onChange({
+      ...skin,
+      appearance: { ...skin.appearance, ...patch, characterStyle: 'human' },
+    });
   const sections = [
     { key: 'avatar' as const, title: '🐾 Thú Bông', options: SKIN_AVATARS },
     { key: 'clothing' as const, title: '🎽 Áo Quần', options: SKIN_CLOTHES },
     { key: 'hat' as const, title: '🕶️ Phụ Kiện', options: SKIN_HATS },
     { key: 'glassType' as const, title: '🍺 Ly Cụng', options: SKIN_GLASSES },
   ];
+  const humanSliders = (
+    sliders: [keyof LobbySkin['appearance'], string][],
+    className = 'grid grid-cols-2 gap-x-3 gap-y-2'
+  ) => (
+    <div className={className}>
+      {sliders.map(([key, label]) => (
+        <label key={key} className="block min-w-0">
+          <span className="flex justify-between gap-1 text-[10px] font-bold text-amber-50">
+            <span className="truncate">{label}</span>
+            <span className="text-amber-300 tabular-nums">{skin.appearance[key]}%</span>
+          </span>
+          <input
+            aria-label={label}
+            type="range"
+            min={0}
+            max={100}
+            value={skin.appearance[key] as number}
+            onChange={(event) =>
+              updateAppearance({ [key]: Number(event.target.value) } as Partial<LobbySkin['appearance']>)
+            }
+            className="w-full accent-amber-400"
+          />
+        </label>
+      ))}
+    </div>
+  );
   return (
-    <div className="fixed z-40 left-3 right-3 bottom-3 sm:right-auto sm:top-20 sm:bottom-auto sm:w-[360px] max-h-[52vh] sm:max-h-[calc(100vh-7rem)] overflow-y-auto laminated-menu rounded-2xl border-4 border-amber-400 shadow-2xl p-4 text-white animate-in slide-in-from-left-6 fade-in duration-200">
+    <div className={`fixed ${onboarding ? 'z-[75]' : 'z-40'} left-3 right-3 bottom-3 sm:right-auto sm:top-20 sm:bottom-auto sm:w-[420px] ${onboarding ? 'max-h-[calc(100vh_-_1.5rem)]' : 'max-h-[58vh] sm:max-h-[calc(100vh-7rem)]'} overflow-y-auto laminated-menu rounded-2xl border-4 border-amber-400 shadow-2xl p-4 text-white animate-in slide-in-from-left-6 fade-in duration-200`}>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-neon text-xl text-amber-300">👕 Tủ Đồ Vỉa Hè</h2>
+        <div>
+          <h2 className="font-neon text-xl text-amber-300">
+            {onboarding && isHumanCreator
+              ? `🎨 BƯỚC ${creatorStep + 1}/${creatorSteps.length} • ${creatorSteps[creatorStep].toUpperCase()}`
+              : onboarding
+              ? '🎨 TẠO NHÂN VẬT'
+              : isHumanCreator
+              ? '🧍 Tạo Nhân Vật'
+              : '👕 Tủ Đồ Vỉa Hè'}
+          </h2>
+          {onboarding && <div className="text-[10px] text-amber-100/75 mt-0.5">Hồ sơ đã sẵn sàng — tạo người nhậu của bạn trước khi vào sảnh.</div>}
+        </div>
         <button
           {...sfx}
-          onClick={onClose}
+          onClick={() => {
+            if (onboarding && isHumanCreator && creatorStep < creatorSteps.length - 1) {
+              setCreatorStep((step) => step + 1);
+              return;
+            }
+            onClose();
+          }}
           className="px-3 py-1.5 rounded-lg bg-amber-400 text-red-900 text-xs font-black cursor-pointer hover:bg-amber-300"
         >
-          ✓ Xong, Về Bàn
+          {onboarding && isHumanCreator && creatorStep < creatorSteps.length - 1
+            ? 'Tiếp theo →'
+            : onboarding
+            ? '✓ Hoàn tất, vào sảnh'
+            : '✓ Xong, Về Bàn'}
         </button>
       </div>
+      {isHumanCreator && (
+        <div className="grid grid-cols-5 gap-1 mb-3">
+          {creatorSteps.map((step, index) => (
+            <button
+              key={step}
+              type="button"
+              onClick={() => !onboarding && setCreatorStep(index)}
+              aria-current={creatorStep === index ? 'step' : undefined}
+              className={`rounded-lg px-1 py-1.5 text-[9px] font-black leading-tight ${
+                creatorStep === index ? 'bg-amber-300 text-zinc-950' : 'bg-black/25 text-white/60'
+              } ${onboarding ? 'cursor-default' : 'cursor-pointer hover:text-amber-100'}`}
+            >
+              <span className="block">{index + 1}</span>{step}
+            </button>
+          ))}
+        </div>
+      )}
       <label className="block text-[11px] font-bold text-amber-100 mb-1">Tên giang hồ</label>
       <input
         value={name}
@@ -339,34 +421,230 @@ export const WardrobePanel: React.FC<{
         onChange={(e) => onNameChange(e.target.value)}
         className="w-full mb-3 px-3 py-2 rounded-lg bg-black/30 border border-amber-300/50 text-sm font-bold focus:outline-none focus:border-amber-300"
       />
-      {sections.map((sec) => (
-        <div key={sec.key} className="mb-3">
-          <div className="text-xs font-black text-amber-100 mb-1.5">{sec.title}</div>
-          <div className="grid grid-cols-3 gap-1.5">
-            {sec.options.map((opt) => {
-              const active = skin[sec.key] === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  {...sfx}
-                  onClick={() => {
-                    sound.playBottleOpen();
-                    onChange({ ...skin, [sec.key]: opt.id });
-                  }}
-                  className={`rounded-xl px-1.5 py-2 text-center border-2 transition cursor-pointer ${
-                    active
-                      ? 'bg-amber-400 text-red-900 border-amber-200'
-                      : 'bg-black/25 border-white/10 hover:border-amber-300/60'
-                  }`}
-                >
-                  <div className="text-xl leading-none">{opt.icon}</div>
-                  <div className="text-[10px] font-bold mt-1 leading-tight">{opt.name}</div>
-                </button>
-              );
-            })}
+      {isHumanCreator ? (
+        <section className="mb-3 rounded-xl border border-amber-300/25 bg-black/20 p-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div>
+              <div className="text-xs font-black text-amber-100">{creatorSteps[creatorStep]}</div>
+              <div className="text-[10px] text-white/60">Xem nhân vật thay đổi trực tiếp ở gương phía sau.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => updateAppearance({ ...DEFAULT_HUMAN_APPEARANCE })}
+              className="px-2 py-1 rounded-lg border border-white/15 bg-black/30 text-[10px] font-bold text-white/75 hover:text-amber-200 cursor-pointer"
+            >
+              Đặt lại
+            </button>
           </div>
-        </div>
-      ))}
+
+          {creatorStep === 0 && (
+            <>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {([
+                  ['male', '👨 Nam'],
+                  ['female', '👩 Nữ'],
+                ] as const).map(([gender, label]) => (
+                  <button
+                    key={gender}
+                    type="button"
+                    aria-pressed={skin.appearance.gender === gender}
+                    onClick={() => updateAppearance({ gender })}
+                    className={`rounded-xl border-2 px-3 py-2 text-xs font-black ${
+                      skin.appearance.gender === gender
+                        ? 'border-amber-200 bg-amber-300 text-zinc-950'
+                        : 'border-white/10 bg-black/25 text-white/75'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-white/55">
+                Nhân vật VRoid (anime). Đổi màu da, tóc và áo ở các bước sau.
+              </p>
+            </>
+          )}
+
+          {creatorStep === 1 && (
+            <>
+              <div className="text-[11px] font-bold text-amber-100 mb-2">🎨 Tông da</div>
+              <div className="grid grid-cols-2 gap-2">
+                {HUMAN_SKIN_TONES.map((tone) => {
+                  const active = skin.appearance.humanSkinTone === tone.id;
+                  return (
+                    <button
+                      key={tone.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => updateAppearance({ humanSkinTone: tone.id })}
+                      className={`flex items-center gap-2 rounded-xl border-2 px-2.5 py-2 text-xs font-bold ${
+                        active ? 'border-amber-200 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-black/25 text-white/75'
+                      }`}
+                    >
+                      <span className="w-5 h-5 rounded-full border border-white/40" style={{ backgroundColor: tone.color }} />
+                      {tone.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-[10px] text-white/55">Giữ chi tiết texture gốc của model, chỉ đổi tông màu.</p>
+            </>
+          )}
+
+          {creatorStep === 2 && (
+            <>
+              <div className="text-[11px] font-bold text-amber-100 mb-2">🎨 Màu tóc</div>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {([
+                  ['natural', 'Màu gốc', 'linear-gradient(135deg, #8b5a3c, #3b2519)'],
+                  ['black', 'Đen', '#171311'],
+                  ['dark_brown', 'Nâu đen', '#34231d'],
+                  ['brown', 'Nâu', '#65432e'],
+                  ['blonde', 'Vàng nâu', '#a98654'],
+                ] as const).map(([hairColor, label, color]) => (
+                  <button
+                    key={hairColor}
+                    type="button"
+                    aria-pressed={skin.appearance.hairColor === hairColor}
+                    onClick={() => updateAppearance({ hairColor })}
+                    className={`flex items-center gap-1.5 rounded-full px-2 py-1 border text-[10px] font-bold ${
+                      skin.appearance.hairColor === hairColor ? 'border-amber-200 text-amber-100' : 'border-white/10 text-white/75'
+                    }`}
+                  >
+                    <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ backgroundColor: color }} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[11px] font-bold text-amber-100 mb-2">👕 Áo vỉa hè</div>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ['tshirt', 'Đồng phục gốc', '👕'],
+                  ['hoodie', 'Xanh xám', '🧥'],
+                ] as const).map(([topStyle, label, icon]) => (
+                  <button
+                    key={topStyle}
+                    type="button"
+                    aria-pressed={skin.appearance.topStyle === topStyle}
+                    onClick={() => updateAppearance({ topStyle })}
+                    className={`rounded-xl border-2 px-2 py-2 text-xs font-bold ${
+                      skin.appearance.topStyle === topStyle
+                        ? 'border-amber-200 bg-amber-300/20 text-amber-100'
+                        : 'border-white/10 bg-black/25 text-white/75'
+                    }`}
+                  >
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 text-[10px] text-white/55">Màu áo được tô lại trên texture của model.</div>
+            </>
+          )}
+
+          {creatorStep === 3 && (
+            <label className="block">
+              <span className="flex justify-between text-[11px] font-black text-amber-100">
+                <span>🍺 Thử mặt khi say</span>
+                <span className="text-rose-300">{previewAlcohol}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={previewAlcohol}
+                onChange={(event) => onPreviewAlcohol(Number(event.target.value))}
+                className="w-full accent-rose-400"
+              />
+              <span className="text-[10px] text-white/55">Mặt ửng đỏ, mắt chớp chậm và nhìn lệch dần theo độ cồn.</span>
+            </label>
+          )}
+        </section>
+      ) : (
+        <>
+          {sections.map((sec) => (
+            <div key={sec.key} className="mb-3">
+              <div className="text-xs font-black text-amber-100 mb-1.5">{sec.title}</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {sec.options.map((opt) => {
+                  const active = skin[sec.key] === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      {...sfx}
+                      onClick={() => {
+                        sound.playBottleOpen();
+                        onChange({ ...skin, [sec.key]: opt.id });
+                      }}
+                      className={`rounded-xl px-1.5 py-2 text-center border-2 transition cursor-pointer ${
+                        active ? 'bg-amber-400 text-red-900 border-amber-200' : 'bg-black/25 border-white/10 hover:border-amber-300/60'
+                      }`}
+                    >
+                      <div className="text-xl leading-none">{opt.icon}</div>
+                      <div className="text-[10px] font-bold mt-1 leading-tight">{opt.name}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <section className="mb-3 rounded-xl border border-amber-300/25 bg-black/20 p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div>
+                <div className="text-xs font-black text-amber-100">🪞 Gương nắn mặt</div>
+                <div className="text-[10px] text-white/60">Tùy chỉnh sâu cho linh vật của bạn</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onChange({ ...skin, appearance: { ...DEFAULT_CHIBI_APPEARANCE } })}
+                className="px-2 py-1 rounded-lg border border-white/15 bg-black/30 text-[10px] font-bold text-white/75 hover:text-amber-200 cursor-pointer"
+              >
+                Đặt lại
+              </button>
+            </div>
+            <div className="mb-3">
+              <div className="text-[11px] font-bold text-amber-100 mb-1.5">🎨 Tông da</div>
+              <div className="flex flex-wrap gap-1.5">
+                {CHIBI_SKIN_TONES.map((tone) => {
+                  const active = skin.appearance.skinTone === tone.id;
+                  return (
+                    <button
+                      key={tone.id}
+                      type="button"
+                      title={tone.label}
+                      aria-label={`Tông da ${tone.label}`}
+                      aria-pressed={active}
+                      onClick={() => onChange({ ...skin, appearance: { ...skin.appearance, skinTone: tone.id } })}
+                      className={`flex items-center gap-1.5 rounded-full px-2 py-1 border text-[10px] font-bold cursor-pointer ${
+                        active ? 'border-amber-200 bg-amber-300/20 text-amber-100' : 'border-white/10 bg-black/25 text-white/75'
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full border border-white/35" style={{ backgroundColor: tone.color }} />
+                      {tone.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {humanSliders([
+              ['eyeSize', '👀 Kích thước mắt'],
+              ['eyeDistance', '↔️ Khoảng cách mắt'],
+              ['eyeSlant', '🎭 Độ xếch mắt'],
+              ['snoutWidth', skin.avatar === 'duck' ? '🦆 Bề ngang mỏ' : '🐽 Bề ngang mõm'],
+              ['mouthSize', '👄 Kích thước miệng'],
+              ['bodyBuild', '🍺 Độ tròn thân'],
+            ])}
+          </section>
+        </>
+      )}
+      {isHumanCreator && onboarding && creatorStep > 0 && (
+        <button
+          type="button"
+          onClick={() => setCreatorStep((step) => Math.max(0, step - 1))}
+          className="w-full rounded-lg border border-white/15 bg-black/25 py-2 text-xs font-bold text-white/75 hover:text-amber-100"
+        >
+          ← Quay lại bước trước
+        </button>
+      )}
     </div>
   );
 };
@@ -377,10 +655,11 @@ export const WardrobePanel: React.FC<{
 export const ProfilePanel: React.FC<{
   name: string;
   avatar: LobbySkin['avatar'];
+  isHuman?: boolean;
   coins: number;
   toastCount: number;
   onClose: () => void;
-}> = ({ name, avatar, coins, toastCount, onClose }) => {
+}> = ({ name, avatar, isHuman = false, coins, toastCount, onClose }) => {
   const [tab, setTab] = useState<'passport' | 'rank'>('passport');
   const [bookOpen, setBookOpen] = useState(false);
   const [passport, setPassport] = useState<{ escaped: number; nights: number; pinned: MatchReceipt | null } | null>(null);
@@ -406,7 +685,7 @@ export const ProfilePanel: React.FC<{
     { name: 'Phi Quân', icon: '🐼', score: 312, title: 'Thần Cồn' },
     { name: 'Khoa Nguyễn', icon: '🐻', score: 287, title: 'Trùm Vỉa Hè' },
     { name: 'Tuấn Xỉn', icon: '🦆', score: 241, title: 'Trùm Vỉa Hè' },
-    { name, icon: AVATAR_ICON[avatar], score: toastCount, title: rank.name, isMe: true },
+    { name, icon: isHuman ? '🧑' : AVATAR_ICON[avatar], score: toastCount, title: rank.name, isMe: true },
     { name: 'Bảo Nguyễn', icon: '🐱', score: 96, title: 'Bợm Tập Sự' },
   ].sort((a, b) => b.score - a.score);
 

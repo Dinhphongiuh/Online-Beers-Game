@@ -5,3 +5,5 @@ export * from './gameHistory.ts';
 export * from './matchReceipt.ts';
 export * from './friendship.ts';
 export * from './customNpc.ts';
+export * from './role.ts';
+export * from './userRole.ts';

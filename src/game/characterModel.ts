@@ -7,6 +7,12 @@ import {
   IKHandControlState,
 } from './types';
 import { createBeerMug } from './proceduralModels';
+import {
+  DEFAULT_CHIBI_APPEARANCE,
+  normalizeChibiAppearance,
+  type ChibiAppearanceDNA,
+  type ChibiSkinTone,
+} from '../../shared/appearance';
 
 export type CheersAnimPhase = 'idle' | 'clink_center' | 'chug_gulp' | 'slam_finish';
 
@@ -44,6 +50,7 @@ export interface CharacterRig {
       isHeartbrokenMaiAnh?: boolean;
       isClimbingTree?: boolean;
       isWalkingToTree?: boolean;
+      isStanding?: boolean;
       isAirSigningBill?: boolean;
       isSlammingTableNo?: boolean;
       isSlumpingYes?: boolean;
@@ -56,18 +63,23 @@ export interface CharacterRig {
     alcoholLevel: number,
     isUser: boolean,
     avatar: CharacterAvatar,
-    specialStatus?: string | null
+    specialStatus?: string | null,
+    isHuman?: boolean
   ) => void;
   /** Force-hide the overhead nameplate (the lobby draws its own HTML badges). */
   setNameplateHidden: (hidden: boolean) => void;
+  /** Human rigs update morphs/materials in place; chibi rigs rebuild when their DNA changes. */
+  setAppearance?: (appearance: ChibiAppearanceDNA) => void;
 }
 
 export function createChibiCharacter(
   avatar: CharacterAvatar = 'dog',
   clothing: ClothingType = 'tanktop_red',
   hat: HatType = 'none',
-  glassType: GlassType = 'beer_mug'
+  glassType: GlassType = 'beer_mug',
+  appearance: ChibiAppearanceDNA = DEFAULT_CHIBI_APPEARANCE
 ): CharacterRig {
+  const look = normalizeChibiAppearance(appearance);
   const root = new THREE.Group();
   root.name = `Character_${avatar}`;
 
@@ -81,8 +93,15 @@ export function createChibiCharacter(
     hamster: 0xf59e0b, // Chuột Hamster vàng mật ong đuôi dài (Nga Phan)
   };
 
+  const toneColors: Record<Exclude<ChibiSkinTone, 'natural'>, number> = {
+    peach: 0xf3a58c,
+    cream: 0xf5e9c8,
+    cocoa: 0x94624a,
+    rose: 0xdb8da7,
+    mint: 0x83bca5,
+  };
   const skinMat = new THREE.MeshStandardMaterial({
-    color: skinColors[avatar],
+    color: look.skinTone === 'natural' ? skinColors[avatar] : toneColors[look.skinTone],
     roughness: 0.6,
   });
 
@@ -176,6 +195,7 @@ export function createChibiCharacter(
     const snoutGeo = new THREE.SphereGeometry(0.11, 16, 16);
     snoutGeo.scale(1.2, 0.8, 1.1);
     const snoutMesh = new THREE.Mesh(snoutGeo, secondaryMat);
+    snoutMesh.scale.x = 0.65 + (look.snoutWidth / 100) * 0.7;
     snoutMesh.position.set(0, -0.04, 0.27);
     head.add(snoutMesh);
 
@@ -215,6 +235,7 @@ export function createChibiCharacter(
     beakGeo.rotateX(Math.PI / 2);
     const beakMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 });
     const beakMesh = new THREE.Mesh(beakGeo, beakMat);
+    beakMesh.scale.x = 0.65 + (look.snoutWidth / 100) * 0.7;
     beakMesh.position.set(0, -0.05, 0.32);
     head.add(beakMesh);
   }
@@ -227,14 +248,15 @@ export function createChibiCharacter(
     roughness: 0.4,
   });
   const mouthGeo = new THREE.SphereGeometry(0.065, 14, 14);
-  mouthGeo.scale(1.25, 0.55, 0.65);
+  const mouthSize = 0.7 + (look.mouthSize / 100) * 0.6;
+  mouthGeo.scale(1.25 * mouthSize, 0.55 * mouthSize, 0.65);
   const mouthMesh = new THREE.Mesh(mouthGeo, mouthMat);
   jaw.add(mouthMesh);
 
   // Cute pink tongue inside mouth
   const tongueMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.4 });
   const tongueGeo = new THREE.SphereGeometry(0.038, 10, 10);
-  tongueGeo.scale(1.1, 0.4, 0.8);
+  tongueGeo.scale(1.1 * mouthSize, 0.4 * mouthSize, 0.8);
   const tongueMesh = new THREE.Mesh(tongueGeo, tongueMat);
   tongueMesh.position.set(0, -0.01, 0.02);
   jaw.add(tongueMesh);
@@ -375,22 +397,45 @@ export function createChibiCharacter(
   const eyeBlackMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.2 });
   const eyeGeo = new THREE.SphereGeometry(0.055, 16, 16);
   const pupilGeo = new THREE.SphereGeometry(0.028, 12, 12);
+  const eyeSize = 0.7 + (look.eyeSize / 100) * 0.6;
+  const eyeHalfSpacing = 0.13 * (0.72 + (look.eyeDistance / 100) * 0.56);
+  const eyeSlant = ((look.eyeSlant - 50) / 50) * 0.035;
+  const eyeLeftY = 0.06 + eyeSlant;
+  const eyeRightY = 0.06 - eyeSlant;
 
   const eyeLeft = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-  eyeLeft.position.set(-0.13, 0.06, 0.28);
+  eyeLeft.position.set(-eyeHalfSpacing, eyeLeftY, 0.28);
+  eyeLeft.scale.setScalar(eyeSize);
   head.add(eyeLeft);
 
   const pupilLeft = new THREE.Mesh(pupilGeo, eyeBlackMat);
-  pupilLeft.position.set(-0.13, 0.06, 0.325);
+  pupilLeft.position.set(-eyeHalfSpacing, eyeLeftY, 0.325);
+  pupilLeft.scale.setScalar(eyeSize);
   head.add(pupilLeft);
 
   const eyeRight = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-  eyeRight.position.set(0.13, 0.06, 0.28);
+  eyeRight.position.set(eyeHalfSpacing, eyeRightY, 0.28);
+  eyeRight.scale.setScalar(eyeSize);
   head.add(eyeRight);
 
   const pupilRight = new THREE.Mesh(pupilGeo, eyeBlackMat);
-  pupilRight.position.set(0.13, 0.06, 0.325);
+  pupilRight.position.set(eyeHalfSpacing, eyeRightY, 0.325);
+  pupilRight.scale.setScalar(eyeSize);
   head.add(pupilRight);
+
+  const blushMat = new THREE.MeshBasicMaterial({
+    color: 0xfb7185,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const blushGeo = new THREE.SphereGeometry(0.045, 12, 10);
+  [-1, 1].forEach((side) => {
+    const blush = new THREE.Mesh(blushGeo, blushMat);
+    blush.position.set(side * 0.2, -0.095, 0.255);
+    blush.renderOrder = 2;
+    head.add(blush);
+  });
 
   // Accessories: Sunglasses / Traffic Helmet / Cold Towel on Head
   if (hat === 'sunglasses') {
@@ -580,7 +625,8 @@ export function createChibiCharacter(
     alcoholLevel: number,
     isUser: boolean,
     charAvatar: CharacterAvatar,
-    specialStatus?: string | null
+    specialStatus?: string | null,
+    isHuman = false
   ) => {
     // The user's own stats already live in the TopBar; their nameplate sits right
     // in front of the camera and covers the table, so only show it for NPCs.
@@ -588,7 +634,7 @@ export function createChibiCharacter(
     nameplateSprite.visible = !isUser && !nameplateForceHidden;
 
     const roundedAlc = Math.round(alcoholLevel);
-    const cacheKey = `${name}|${title}|${roundedAlc}|${isUser}|${charAvatar}|${specialStatus || ''}`;
+    const cacheKey = `${name}|${title}|${roundedAlc}|${isUser}|${charAvatar}|${specialStatus || ''}|${isHuman}`;
     if (cacheKey === lastNameplateKey || !nameCtx) return;
     lastNameplateKey = cacheKey;
 
@@ -665,8 +711,8 @@ export function createChibiCharacter(
     nameCtx.restore();
 
     // Main Line: Avatar Emoji + Bold Player Name
-    const emoji = avatarEmojiMap[charAvatar] || '🍻';
-    const speciesLabel = avatarLabelMap[charAvatar] || '';
+    const emoji = isHuman ? '🧑' : avatarEmojiMap[charAvatar] || '🍻';
+    const speciesLabel = isHuman ? 'Người Nhậu' : avatarLabelMap[charAvatar] || '';
     nameCtx.font = '900 34px system-ui, -apple-system, sans-serif';
     nameCtx.textAlign = 'center';
     nameCtx.textBaseline = 'middle';
@@ -718,6 +764,7 @@ export function createChibiCharacter(
       isHeartbrokenMaiAnh?: boolean;
       isClimbingTree?: boolean;
       isWalkingToTree?: boolean;
+      isStanding?: boolean;
       isAirSigningBill?: boolean;
       isSlammingTableNo?: boolean;
       isSlumpingYes?: boolean;
@@ -730,6 +777,7 @@ export function createChibiCharacter(
       hamsterTailGroup.rotation.y = Math.sin(animTimer * 11) * 0.48;
       hamsterTailGroup.rotation.z = Math.cos(animTimer * 7) * 0.18;
     }
+    blushMat.opacity = Math.min(0.42, Math.max(0, alcohol / 100) * 0.42);
 
     // Show/hide 3D phone in left hand when Phi Quân calls NYC Mai Anh
     phoneGroup.visible = !!extraState?.isCallingMaiAnh;
@@ -751,9 +799,9 @@ export function createChibiCharacter(
     // 0b. Dynamic Beer Belly Inflation ("Bụng Bia 100% phình to tròn xoe như cái trống!")
     const bladderRatio = Math.max(0, Math.min((extraState?.bladderLevel || 0) / 100, 1));
     torsoMesh.scale.set(
-      1.0 + bladderRatio * 0.62,
-      1.0 + bladderRatio * 0.34,
-      1.0 + bladderRatio * 0.78
+      0.86 + (look.bodyBuild / 100) * 0.28 + bladderRatio * 0.62,
+      0.9 + (look.bodyBuild / 100) * 0.2 + bladderRatio * 0.34,
+      0.8 + (look.bodyBuild / 100) * 0.4 + bladderRatio * 0.78
     );
 
     // 0c. Rượu Đế 3D Fire Breath Animation ("Khè ra lửa")
@@ -783,8 +831,8 @@ export function createChibiCharacter(
       head.rotation.z = Math.sin(animTimer * 14) * 0.45;
       head.rotation.x = Math.cos(animTimer * 14) * 0.35;
       body.rotation.z = Math.sin(animTimer * 8) * 0.35;
-      pupilLeft.position.x = -0.13 + Math.sin(animTimer * 18) * 0.025;
-      pupilRight.position.x = 0.13 - Math.sin(animTimer * 18) * 0.025;
+      pupilLeft.position.x = -eyeHalfSpacing + Math.sin(animTimer * 18) * 0.025;
+      pupilRight.position.x = eyeHalfSpacing - Math.sin(animTimer * 18) * 0.025;
       return;
     }
 
@@ -1338,13 +1386,13 @@ export function createChibiCharacter(
     if (drunkRatio > 0.4) {
       const eyeWanderX = Math.sin(animTimer * 3) * 0.015 * drunkRatio;
       const eyeWanderY = Math.cos(animTimer * 2.2) * 0.015 * drunkRatio;
-      pupilLeft.position.x = -0.13 + eyeWanderX;
-      pupilLeft.position.y = 0.06 + eyeWanderY;
-      pupilRight.position.x = 0.13 - eyeWanderX;
-      pupilRight.position.y = 0.06 + eyeWanderY;
+      pupilLeft.position.x = -eyeHalfSpacing + eyeWanderX;
+      pupilLeft.position.y = eyeLeftY + eyeWanderY;
+      pupilRight.position.x = eyeHalfSpacing - eyeWanderX;
+      pupilRight.position.y = eyeRightY + eyeWanderY;
     } else {
-      pupilLeft.position.set(-0.13, 0.06, 0.325);
-      pupilRight.position.set(0.13, 0.06, 0.325);
+      pupilLeft.position.set(-eyeHalfSpacing, eyeLeftY, 0.325);
+      pupilRight.position.set(eyeHalfSpacing, eyeRightY, 0.325);
     }
   };
 
