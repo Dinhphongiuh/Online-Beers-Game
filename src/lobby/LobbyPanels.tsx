@@ -511,7 +511,7 @@ export const WardrobePanel: React.FC<{
                       skin.appearance.hairColor === hairColor ? 'border-amber-200 text-amber-100' : 'border-white/10 text-white/75'
                     }`}
                   >
-                    <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ backgroundColor: color }} />
+                    <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ background: color }} />
                     {label}
                   </button>
                 ))}
