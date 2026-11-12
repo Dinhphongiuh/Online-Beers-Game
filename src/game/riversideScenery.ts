@@ -33,6 +33,7 @@ import {
   mergeStatic,
 } from './quanOcProps';
 import { HOUSE_DEPTH, HOUSE_WIDTH, createQuanOcHouse, type QuanOcHouse } from './quanOcInterior';
+import { createQuanOcParking, type QuanOcParking } from './quanOcParking';
 
 export const RIVER_EDGE_Z = -5.6;
 export const ROAD_EDGE_Z = 6.6;
@@ -57,6 +58,8 @@ export interface RiversideScenery {
   bounds: PlayerBounds;
   /** The walk-in shophouse: its interior box and where its staff stand. */
   house: Pick<QuanOcHouse, 'interior' | 'tight' | 'staff' | 'route'>;
+  /** Bãi giữ xe east of the stall, with the player's bike in it. */
+  parking: QuanOcParking;
   /** `focus` = the walking player (opens doors). */
   update: (time: number, delta: number, focus?: THREE.Vector3) => void;
 }
@@ -787,7 +790,7 @@ export function createRiversideScenery(): RiversideScenery {
     [-13, 5.6, 1],
     [6.5, 5.7, 2],
     [-20, 5.6, 3],
-    [20, 5.6, 4],
+    [29.5, 5.6, 4], // past the parking lot
   ].forEach(([x, z, seed]) => {
     const tree = createTree(seed);
     tree.position.set(x, 0, z);
@@ -795,14 +798,18 @@ export function createRiversideScenery(): RiversideScenery {
     circle(x, z, 0.6);
   });
 
+  // Bãi giữ xe: the lot the ride ends in (and the ride home starts from).
+  const parking = createQuanOcParking();
+  props.add(parking.group);
+  colliders.push(...parking.colliders);
+  updates.push((time) => parking.update(time));
+
   // Scooters parked nose-in along the curb.
   [
     [-7.6, 0xe11d48],
     [-6.7, 0x0ea5e9],
     [-5.8, 0xf4f4f5],
     [-4.9, 0x22c55e],
-    [11.6, 0x18181b],
-    [12.5, 0xf59e0b],
   ].forEach(([x, color], i) => {
     const bike = createParkedScooter(color);
     bike.position.set(x, 0, ROAD_EDGE_Z - 0.75);
@@ -936,6 +943,7 @@ export function createRiversideScenery(): RiversideScenery {
     backdrop,
     sky: createSky(),
     house: { interior: house.interior, tight: house.tight, staff: house.staff, route: house.route },
+    parking,
     colliders,
     seats,
     bounds: {

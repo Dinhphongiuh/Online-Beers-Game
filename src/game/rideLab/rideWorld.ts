@@ -25,6 +25,7 @@ import {
   crash,
   drunkInputLag,
   hitBump,
+  isReversing,
   kickstart,
   stepBike,
   toggleKickstand,
@@ -32,13 +33,32 @@ import {
   type BikeSpec,
   type BikeState,
 } from './bikePhysics';
-import { SIDEWALK, ZONE_LABEL, createRoute, type Route, type RouteSample, type Zone } from './route';
+import { SIDEWALK, ZONE_LABEL, createRoute, type RideDirection, type Route, type RouteSample, type Zone } from './route';
 import { createRideBike, createTrafficCar, createTrafficScooter, mergeByMaterial, type RideBikeModel } from './rideModels';
 
 export type CameraMode = 'tpp' | 'fpp';
 export type RideEventKind = 'info' | 'warn' | 'crash' | 'success';
 
+export interface RideResult {
+  direction: RideDirection;
+  /** Seconds from the first metre ridden to arrival. */
+  time: number;
+  crashes: number;
+  ranRedLights: number;
+  /** Stopped at the checkpoint with alcohol on the breath. */
+  fined: boolean;
+}
+
 export interface RideTelemetry {
+  direction: RideDirection;
+  /** Paddling the bike backward with the feet (shown as R). */
+  reversing: boolean;
+  /** Next traffic light ahead (within 90 m), if any. */
+  light: { state: LightState; remaining: number; distance: number } | null;
+  /** Near the parking lot: metres to the rider's bay (outbound only). */
+  bayDistance: number | null;
+  ranRedLights: number;
+  crashes: number;
   speedKmh: number;
   gear: number;
   rpm: number;
@@ -75,7 +95,10 @@ export interface RideWorld {
   setCamera: (mode: CameraMode) => void;
   setAlcohol: (value: number) => void;
   setTraffic: (enabled: boolean) => void;
-  reset: () => void;
+  /** Restart the trip (optionally switching direction). */
+  reset: (direction?: RideDirection) => void;
+  /** Fired once when the rider arrives (parked in the bay, or home at the gate). */
+  onArrive?: (result: RideResult) => void;
   telemetry: () => RideTelemetry;
   onEvent?: (text: string, kind: RideEventKind) => void;
   onFps?: (fps: number) => void;
@@ -434,9 +457,12 @@ function buildTown(scene: THREE.Scene, route: Route) {
   const random = rng(12);
 
   // Ground under everything (back lots, gaps between houses).
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), std(0x1a1a1c, 0.95));
+  const xs = samples.map((p) => p.x);
+  const zs = samples.map((p) => p.z);
+  const [minX, maxX, minZ, maxZ] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(maxX - minX + 600, maxZ - minZ + 600), std(0x1a1a1c, 0.95));
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(140, -0.06, 220);
+  ground.position.set((minX + maxX) / 2, -0.06, (minZ + maxZ) / 2);
   ground.receiveShadow = true;
   town.add(ground);
 
@@ -488,8 +514,10 @@ function buildTown(scene: THREE.Scene, route: Route) {
       const sample = route.at(s);
       const house = sample.zone === 'hem';
       const width = house ? 3.8 + random() * 1.2 : 4 + random() * 2.2;
-      // The riverside's left is the river; the quán owns the last plot on the right.
-      if ((sample.zone === 'bo_ke' && side < 0) || (side > 0 && s > route.finishS - 14 && s < route.finishS + 10)) {
+      // The riverside's left is the river; the cross street cuts through both rows;
+      // the parking lot and the quán own the last plots on the right.
+      const lotStart = route.lot.s - route.lot.halfLength - 2;
+      if ((sample.zone === 'bo_ke' && side < 0) || Math.abs(s - route.crossroadsS) < 11 || (side > 0 && s > lotStart)) {
         s += width;
         continue;
       }
@@ -508,6 +536,26 @@ function buildTown(scene: THREE.Scene, route: Route) {
       s += width;
     }
   });
+  // Shophouses lining the cross street, both directions.
+  {
+    const c = route.at(route.crossroadsS);
+    const shops = variants.filter((v) => !v.house);
+    [-1, 1].forEach((along) =>
+      [-1, 1].forEach((side) => {
+        for (let d = 13; d < 90; d += 4.5 + random() * 1.5) {
+          // Cross street runs along the main road's right vector; its own "right" is ±tangent.
+          const depth = 12;
+          const offset = (5 + 3.2 + depth / 2) * side;
+          const x = c.x + c.rx * d * along + c.tx * offset;
+          const z = c.z + c.rz * d * along + c.tz * offset;
+          const yaw = Math.atan2(-c.tx * side, -c.tz * side);
+          q.setFromAxisAngle(up, yaw);
+          const variant = shops[Math.floor(random() * shops.length)];
+          variant.matrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(4.4, variant.height, depth)));
+        }
+      })
+    );
+  }
   const unitBox = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const sideWall = std(0x6b6258, 0.9);
   const roof = std(0x3f3a36, 0.9);
@@ -659,15 +707,19 @@ function buildTown(scene: THREE.Scene, route: Route) {
   });
   // Far bank skyline.
   const skyline = new THREE.Group();
-  for (let i = 0; i < 26; i++) {
+  const riverSide = samples.filter((p) => p.zone === 'bo_ke');
+  for (let i = 0; i < riverSide.length; i += 20) {
+    const p = riverSide[i];
     const h = 12 + random() * 40;
-    const w = 10 + random() * 14;
+    const w = 12 + random() * 12;
     const tex = facadeTextures(500 + i, Math.max(3, Math.round(h / 3.4)), false);
     const b = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, 10),
       new THREE.MeshStandardMaterial({ color: 0x1f2128, emissiveMap: tex.glowMap, emissive: 0xffffff, emissiveIntensity: 0.9, roughness: 0.9, fog: false })
     );
-    b.position.set(-180 + i * 22 + random() * 8, h / 2 - 1.3, 520 + random() * 25);
+    const across = -(80 + random() * 25); // left of the riverside = across the water
+    b.position.set(p.x + p.rx * across, h / 2 - 1.3, p.z + p.rz * across);
+    b.rotation.y = Math.atan2(p.rx, p.rz); // face the river
     skyline.add(b);
   }
   town.add(skyline);
@@ -681,6 +733,7 @@ function buildTown(scene: THREE.Scene, route: Route) {
     }
   });
   humpTex.wrapS = THREE.RepeatWrapping;
+  const checkpoints: { group: THREE.Group; direction: RideDirection | undefined }[] = [];
   route.events.forEach((event) => {
     const sample = route.at(event.s);
     const p = new THREE.Vector3(sample.x + sample.rx * event.lateral, 0, sample.z + sample.rz * event.lateral);
@@ -701,7 +754,12 @@ function buildTown(scene: THREE.Scene, route: Route) {
       hump.position.copy(p).setY(0);
       town.add(hump);
     } else {
-      town.add(createCheckpoint(p, yaw, sample));
+      // Built in the frame of the riders it stops (the ride home runs backwards along the route).
+      const travel = event.direction === 'return' ? -1 : 1;
+      const centre = new THREE.Vector3(sample.x, 0, sample.z);
+      const group = createCheckpoint(centre, Math.atan2(sample.tx * travel, sample.tz * travel), sample);
+      town.add(group);
+      checkpoints.push({ group, direction: event.direction });
     }
   });
 
@@ -719,9 +777,12 @@ function buildTown(scene: THREE.Scene, route: Route) {
   homeSign.position.set(start.x - start.tx * 1, 3.2, start.z - start.tz * 1);
   homeSign.lookAt(start.x + start.tx * 10, 3.2, start.z + start.tz * 10);
   town.add(homeSign);
-  town.add(createQuan(route));
+  const crossroads = createCrossroads(town, route, asphaltMat);
+  const lot = createQuanAndLot(route);
+  town.add(lot.group);
+  lot.lights.forEach((head) => lamps.push({ s: route.lot.s, head, power: 0.45 }));
 
-  return { town, lamps, parked };
+  return { town, lamps, parked, checkpoints, crossroads, lot };
 }
 
 /** A rider-less scooter resting on its side stand, merged into a few meshes. */
@@ -732,6 +793,11 @@ function createTrafficScooterParked(seed: number) {
   );
   model.kickstand.rotation.x = 0.5;
   model.lean.rotation.z = -0.12; // leaning onto the stand (left, +X)
+  // Parked: lights off.
+  model.headLens.emissiveIntensity = 0.05;
+  model.brakeLight.emissiveIntensity = 0.15;
+  model.signals.left.emissiveIntensity = 0;
+  model.signals.right.emissiveIntensity = 0;
   return mergeByMaterial(model.root);
 }
 
@@ -784,63 +850,422 @@ function createCheckpoint(position: THREE.Vector3, yaw: number, sample: RouteSam
   return group;
 }
 
-function createQuan(route: Route) {
+// ------------------------------------------------------------------ crossroads
+
+export type LightState = 'green' | 'yellow' | 'red';
+
+/** Main-road light cycle (s): green, yellow, red. The cross street gets the inverse. */
+const LIGHT_CYCLE = { green: 12, yellow: 3, red: 10 };
+const CYCLE = LIGHT_CYCLE.green + LIGHT_CYCLE.yellow + LIGHT_CYCLE.red;
+
+function mainLight(time: number): { state: LightState; remaining: number } {
+  const t = time % CYCLE;
+  if (t < LIGHT_CYCLE.green) return { state: 'green', remaining: LIGHT_CYCLE.green - t };
+  if (t < LIGHT_CYCLE.green + LIGHT_CYCLE.yellow) return { state: 'yellow', remaining: LIGHT_CYCLE.green + LIGHT_CYCLE.yellow - t };
+  return { state: 'red', remaining: CYCLE - t };
+}
+function crossLight(time: number): { state: LightState; remaining: number } {
+  // Green for the cross street while the main road is red (with a second of all-red each side).
+  const t = time % CYCLE;
+  const greenFrom = LIGHT_CYCLE.green + LIGHT_CYCLE.yellow + 1;
+  const greenTo = CYCLE - 3;
+  if (t >= greenFrom && t < greenTo) return { state: 'green', remaining: greenTo - t };
+  if (t >= greenTo && t < CYCLE - 1) return { state: 'yellow', remaining: CYCLE - 1 - t };
+  return { state: 'red', remaining: t < greenFrom ? greenFrom - t : CYCLE - t + greenFrom };
+}
+
+function createCrossroads(town: THREE.Group, route: Route, asphaltMat: THREE.MeshStandardMaterial) {
+  const c = route.at(route.crossroadsS);
+  const crossYaw = Math.atan2(c.rx, c.rz); // the cross street runs along the main road's right vector
+  const crossWidth = 9.5;
+  const half = c.width / 2;
+  // Cross street asphalt (covers the main road's markings inside the junction).
+  const crossTex = (asphaltMat.map as THREE.Texture).clone();
+  crossTex.repeat.set(1, 180 / 8);
+  crossTex.needsUpdate = true;
+  const cross = new THREE.Mesh(new THREE.PlaneGeometry(crossWidth, 180).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: crossTex, roughness: 0.62 }));
+  cross.position.set(c.x, 0.004, c.z);
+  cross.rotation.y = crossYaw;
+  cross.receiveShadow = true;
+  town.add(cross);
+  // Its pavements (beyond the main road's pavements).
+  const tiles = createSidewalkTexture();
+  tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
+  tiles.repeat.set(1.6, 40);
+  const tileMat = new THREE.MeshStandardMaterial({ map: tiles, roughness: 0.6, color: 0xa8a29e });
+  [-1, 1].forEach((along) =>
+    [-1, 1].forEach((side) => {
+      const walk = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 80).rotateX(-Math.PI / 2), tileMat);
+      const d = half + SIDEWALK.duong + 40;
+      const o = crossWidth / 2 + 1.6;
+      walk.position.set(c.x + c.rx * d * along + c.tx * o * side, 0.15, c.z + c.rz * d * along + c.tz * o * side);
+      walk.rotation.y = crossYaw;
+      town.add(walk);
+    })
+  );
+  // Zebra crossings on the main road either side of the junction, and stop lines.
+  const zebra = canvasTex(256, 64, (ctx) => {
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.fillStyle = 'rgba(240,240,232,0.9)';
+    for (let i = 0; i < 8; i++) ctx.fillRect(i * 32 + 4, 0, 20, 64);
+  });
+  const zebraMat = new THREE.MeshStandardMaterial({ map: zebra, transparent: true, roughness: 0.6, depthWrite: false });
+  const white = new THREE.MeshBasicMaterial({ color: 0xeeeeea });
+  const roadYaw = Math.atan2(c.tx, c.tz);
+  [-1, 1].forEach((along) => {
+    const at = route.at(route.crossroadsS + along * (crossWidth / 2 + 2));
+    const z = new THREE.Mesh(new THREE.PlaneGeometry(at.width, 3).rotateX(-Math.PI / 2), zebraMat);
+    z.position.set(at.x, 0.012, at.z);
+    z.rotation.y = roadYaw;
+    town.add(z);
+    // Stop line across the lane arriving at this side (outbound arrives from -s, return from +s).
+    const stop = route.at(route.crossroadsS + along * (crossWidth / 2 + 4.2));
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(stop.width / 2, 0.3).rotateX(-Math.PI / 2), white);
+    const lane = (stop.width / 4) * -along; // outbound lane (+lateral) on the -s side
+    line.position.set(stop.x + stop.rx * lane, 0.014, stop.z + stop.rz * lane);
+    line.rotation.y = roadYaw;
+    town.add(line);
+  });
+
+  // Signal heads: red / yellow / green lamps and a countdown display (very Saigon).
+  const makeSet = () => ({
+    red: glow(0xff2020, 0.1),
+    yellow: glow(0xffb020, 0.1),
+    green: glow(0x20ff70, 0.1),
+    canvas: document.createElement('canvas'),
+    texture: null as THREE.CanvasTexture | null,
+    shown: '',
+  });
+  const mainSet = makeSet();
+  const crossSet = makeSet();
+  [mainSet, crossSet].forEach((set) => {
+    set.canvas.width = 128;
+    set.canvas.height = 64;
+    set.texture = new THREE.CanvasTexture(set.canvas);
+    set.texture.colorSpace = THREE.SRGBColorSpace;
+  });
+  const metal = std(0x3f3f46, 0.5, 0.6);
+  const housing = std(0x18181b, 0.6);
+  const pole = (x: number, z: number, faceYaw: number, set: ReturnType<typeof makeSet>) => {
+    const g = new THREE.Group();
+    g.position.set(x, 0.15, z);
+    g.rotation.y = faceYaw;
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 10), metal).translateY(2.1));
+    const head = new THREE.Group();
+    head.position.set(0, 3.6, 0.2);
+    head.add(new THREE.Mesh(new THREE.BoxGeometry(0.36, 1.05, 0.26), housing));
+    ([
+      [set.red, 0.32],
+      [set.yellow, 0],
+      [set.green, -0.32],
+    ] as const).forEach(([mat, y]) => {
+      const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.12, 20), mat);
+      lamp.position.set(0, y, 0.135);
+      head.add(lamp);
+      head.add(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.12, 16, 1, true, -Math.PI / 2, Math.PI), housing).translateY(y + 0.1).translateZ(0.17).rotateX(Math.PI / 2));
+    });
+    const display = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25), new THREE.MeshBasicMaterial({ map: set.texture!, toneMapped: false }));
+    display.position.set(0, -0.72, 0.14);
+    head.add(display);
+    head.add(new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.32, 0.2), housing).translateY(-0.72));
+    g.add(head);
+    town.add(g);
+  };
+  // Main road: one head per direction on the rider's right before the junction.
+  [-1, 1].forEach((along) => {
+    const p = route.at(route.crossroadsS + along * (crossWidth / 2 + 4.4));
+    const side = -along; // outbound riders (coming from -s) have the light on their right (+lateral)
+    const l = (p.width / 2 + 0.6) * side;
+    pole(p.x + p.rx * l, p.z + p.rz * l, Math.atan2(p.tx * along, p.tz * along), mainSet);
+  });
+  // Cross street heads (for show and for the cross traffic).
+  [-1, 1].forEach((along) => {
+    const o = (crossWidth / 2 + 0.6) * -along;
+    const d = (half + 1.2) * along;
+    pole(c.x + c.rx * d + c.tx * o, c.z + c.rz * d + c.tz * o, Math.atan2(c.rx * along, c.rz * along), crossSet);
+  });
+
+  const paint = (set: ReturnType<typeof makeSet>, light: { state: LightState; remaining: number }) => {
+    set.red.emissiveIntensity = light.state === 'red' ? 8 : 0.1;
+    set.yellow.emissiveIntensity = light.state === 'yellow' ? 8 : 0.1;
+    set.green.emissiveIntensity = light.state === 'green' ? 8 : 0.1;
+    const text = String(Math.ceil(light.remaining)).padStart(2, '0');
+    const key = light.state + text;
+    if (key === set.shown) return;
+    set.shown = key;
+    const ctx = set.canvas.getContext('2d')!;
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, 128, 64);
+    ctx.fillStyle = light.state === 'green' ? '#34ff7a' : light.state === 'yellow' ? '#ffc23a' : '#ff3434';
+    ctx.font = '900 54px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, 64, 52);
+    set.texture!.needsUpdate = true;
+  };
+
+  // Cross traffic: scooters that go when the cross street has green.
+  const crossAgents = Array.from({ length: 5 }, (_, i) => {
+    const object = createTrafficScooter(70 + i, RIDE_BIKES[i % RIDE_BIKES.length]);
+    town.add(object);
+    const dir = i % 2 ? 1 : -1;
+    return { object, d: -80 + i * 34, dir, speed: 0, lane: (crossWidth / 4) * dir, x: 0, z: 0 };
+  });
+  const stopAt = half + 3.5; // stop short of the main road
+
+  return {
+    stopS: (direction: RideDirection) => route.crossroadsS + (direction === 'outbound' ? -1 : 1) * (crossWidth / 2 + 4.2),
+    light: mainLight,
+    update: (time: number, dt: number) => {
+      const main = mainLight(time);
+      const crossing = crossLight(time);
+      paint(mainSet, main);
+      paint(crossSet, crossing);
+      crossAgents.forEach((a) => {
+        const before = a.d * a.dir; // distance past the junction centre (negative = approaching)
+        const mustStop = crossing.state !== 'green' && before < -stopAt + 0.5 && before > -stopAt - 14;
+        const target = mustStop ? 0 : 9;
+        a.speed += (target - a.speed) * Math.min(1, dt * (mustStop ? 3 : 1.5));
+        if (mustStop && before + a.speed * dt > -stopAt) a.speed = 0;
+        a.d += a.speed * a.dir * dt;
+        if (a.d * a.dir > 90) a.d = -90 * a.dir;
+        a.x = c.x + c.rx * a.d + c.tx * a.lane;
+        a.z = c.z + c.rz * a.d + c.tz * a.lane;
+        a.object.position.set(a.x, 0, a.z);
+        a.object.rotation.y = Math.atan2(c.rx * a.dir, c.rz * a.dir);
+      });
+      return crossAgents;
+    },
+  };
+}
+
+// ------------------------------------------------------------------ parking lot + quán
+
+/** "BÃI GIỮ XE" before the quán: tin roof, numbered bays, parked bikes, the attendant's booth. */
+function createQuanAndLot(route: Route) {
   const group = new THREE.Group();
-  const f = route.at(route.finishS);
-  const side = 1;
-  const yaw = Math.atan2(-f.rx * side, -f.rz * side);
-  // Shopfront building.
+  const { lot, samples } = route;
+  const random = rng(31);
+  const colliders: { x: number; z: number; r: number }[] = [];
+  const lights: THREE.Vector3[] = [];
+  const mid = route.at(lot.s);
+  const edge = mid.width / 2 + SIDEWALK[mid.zone];
+  const from = samples.findIndex((p) => p.s >= lot.s - lot.halfLength - 0.6);
+  let to = from;
+  while (to < samples.length - 1 && samples[to + 1].s <= lot.s + lot.halfLength + 0.6) to++;
+  const point = (s: number, lateral: number, y = 0) => {
+    const p = route.at(s);
+    return new THREE.Vector3(p.x + p.rx * lateral, y, p.z + p.rz * lateral);
+  };
+  const yawAcross = Math.atan2(mid.rx, mid.rz); // pointing away from the road
+
+  // Oil-stained concrete floor at pavement height.
+  const floorTex = canvasTex(256, 256, (ctx) => {
+    ctx.fillStyle = '#6b6a66';
+    ctx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 5000; i++) {
+      const v = 80 + random() * 50;
+      ctx.fillStyle = `rgba(${v},${v},${v - 4},0.5)`;
+      ctx.fillRect(random() * 256, random() * 256, 2, 2);
+    }
+    for (let i = 0; i < 14; i++) {
+      ctx.fillStyle = 'rgba(20,18,14,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(random() * 256, random() * 256, 8 + random() * 16, 6 + random() * 10, random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+  group.add(new THREE.Mesh(ribbon(samples, from, to, () => edge - 0.02, () => edge + lot.depth, 0.152, 4, () => lot.depth / 4), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.75 })));
+
+  // Bay lines and the rider's glowing bay.
+  const line = new THREE.MeshBasicMaterial({ color: 0xf5f5f0 });
+  const lineGeo = new THREE.PlaneGeometry(0.07, 2.2).rotateX(-Math.PI / 2);
+  lot.bays.forEach((bay) => {
+    [-0.575, 0.575].forEach((ds) => {
+      const m = new THREE.Mesh(lineGeo, line);
+      m.position.copy(point(bay.s + ds, bay.lateral, 0.158));
+      m.rotation.y = yawAcross;
+      group.add(m);
+    });
+  });
+  const playerBay = lot.bays[lot.playerBay];
+  const marker = glow(0x22ff88, 3);
+  const markerGroup = new THREE.Group();
+  markerGroup.position.copy(point(playerBay.s, playerBay.lateral, 0.162));
+  markerGroup.rotation.y = yawAcross;
+  [
+    [0, -1.1, 1.1, 0.08],
+    [0, 1.1, 1.1, 0.08],
+    [-0.55, 0, 0.08, 2.2],
+    [0.55, 0, 0.08, 2.2],
+  ].forEach(([x, z, w, d]) => markerGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), marker).translateX(x).translateZ(z)));
+  const bayLabel = canvasTex(256, 96, (ctx) => {
+    ctx.fillStyle = '#052e16';
+    ctx.fillRect(0, 0, 256, 96);
+    ctx.fillStyle = '#4ade80';
+    ctx.font = '900 40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Ô SỐ ${lot.playerBay + 20}`, 128, 44);
+    ctx.fillStyle = '#d1fae5';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('chỗ của bạn', 128, 78);
+  });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.34), new THREE.MeshBasicMaterial({ map: bayLabel, toneMapped: false, side: THREE.DoubleSide }));
+  sign.position.set(0, 1.5, 1.2);
+  sign.rotation.y = Math.PI; // readable from the road
+  markerGroup.add(sign);
+  markerGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 6), std(0x9ca3af)).translateY(0.7).translateZ(1.2));
+  group.add(markerGroup);
+
+  // Parked bikes in most of the other bays (nose away from the road).
+  lot.bays.forEach((bay, i) => {
+    if (i === lot.playerBay || random() < 0.25) return;
+    const bike = createTrafficScooterParked(i + 3);
+    bike.position.copy(point(bay.s, bay.lateral, 0.15));
+    bike.rotation.y = yawAcross + (random() - 0.5) * 0.12;
+    group.add(bike);
+    [-0.55, 0.55].forEach((d) => {
+      const c = point(bay.s, bay.lateral + d);
+      colliders.push({ x: c.x, z: c.z, r: 0.42 });
+    });
+  });
+
+  // Corrugated tin roof on posts, tubes underneath.
+  const tin = canvasTex(64, 256, (ctx) => {
+    for (let y = 0; y < 256; y += 8) {
+      const g = ctx.createLinearGradient(0, y, 0, y + 8);
+      g.addColorStop(0, '#5b7a99');
+      g.addColorStop(0.5, '#9fb6cc');
+      g.addColorStop(1, '#4a627a');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, y, 64, 8);
+    }
+  });
+  tin.wrapS = tin.wrapT = THREE.RepeatWrapping;
+  group.add(
+    new THREE.Mesh(
+      ribbon(samples, from, to, () => edge + 0.2, () => edge + lot.depth + 0.3, 3.15, 1, () => 1),
+      new THREE.MeshStandardMaterial({ map: tin, roughness: 0.45, metalness: 0.5, side: THREE.DoubleSide })
+    )
+  );
+  const postMat = std(0x52525b, 0.5, 0.6);
+  [-lot.halfLength, 0, lot.halfLength].forEach((ds) =>
+    [edge + 0.4, edge + lot.depth - 0.1].forEach((l) => {
+      const p = point(lot.s + ds, l);
+      group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.0, 8), postMat).translateX(p.x).translateY(1.65).translateZ(p.z));
+      colliders.push({ x: p.x, z: p.z, r: 0.12 });
+    })
+  );
+  [-lot.halfLength * 0.6, 0, lot.halfLength * 0.6].forEach((ds) => {
+    const p = point(lot.s + ds, edge + lot.depth / 2, 3.05);
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 1.3), glow(0xeaf6ff, 5));
+    tube.position.copy(p);
+    tube.rotation.y = yawAcross;
+    group.add(tube);
+    lights.push(p.clone().setY(2.9));
+  });
+
+  // Signboard on the roof edge facing the road.
+  const board = canvasTex(1024, 160, (ctx) => {
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(0, 0, 1024, 160);
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(6, 6, 1012, 148);
+    ctx.fillStyle = '#b91c1c';
+    ctx.font = '900 84px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('BÃI GIỮ XE', 512, 86);
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 40px sans-serif';
+    ctx.fillText('5.000đ / lượt  •  Có bảo vệ  •  Gửi xe lấy vé', 512, 138);
+  });
+  const boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.1), new THREE.MeshStandardMaterial({ map: board, emissiveMap: board, emissive: 0xffffff, emissiveIntensity: 0.7, side: THREE.DoubleSide }));
+  boardMesh.position.copy(point(lot.s, edge + 0.2, 3.75));
+  boardMesh.rotation.y = yawAcross + Math.PI;
+  group.add(boardMesh);
+
+  // Attendant's booth at the front corner: desk, ticket book, stool, the attendant.
+  const booth = new THREE.Group();
+  booth.position.copy(point(lot.s - lot.halfLength - 1.4, edge + 1.6, 0.15));
+  booth.rotation.y = yawAcross + Math.PI; // window toward the road
+  booth.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.3, 1.4), std(0x1d4ed8, 0.6)).translateY(1.15));
+  booth.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 1.7), std(0x334155, 0.5)).translateY(2.34));
+  booth.add(new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.7), glow(0xffe2a8, 1.2)).translateY(1.5).translateZ(0.705));
+  const desk = new THREE.Group();
+  desk.position.set(0, 0, 1.2);
+  desk.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.06, 0.55), std(0x7c4a24, 0.6)).translateY(0.75));
+  [-0.42, 0.42].forEach((x) => desk.add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.75, 0.5), std(0x52525b)).translateX(x).translateY(0.375)));
+  desk.add(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.16), std(0xfef3c7, 0.9)).translateY(0.8).translateX(0.2));
+  desk.add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.12), std(0x111111)).translateY(0.82).translateX(-0.25));
+  booth.add(desk);
+  const stool = createPlasticStool(0xdc2626);
+  stool.scale.setScalar(0.85);
+  stool.position.set(0, 0, 0.55);
+  booth.add(stool);
+  // Attendant: sitting on the stool, cap, a whistle-orange vest.
+  const guard = new THREE.Group();
+  guard.position.set(0, 0, 0.55);
+  guard.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.35, 4, 10), std(0xf97316, 0.7)).translateY(0.95));
+  guard.add(new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10), std(0xd6a77a)).translateY(1.38));
+  guard.add(new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.06, 14), std(0x1e3a8a)).translateY(1.48));
+  guard.add(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.02, 0.12), std(0x1e3a8a)).translateY(1.46).translateZ(0.12));
+  [-1, 1].forEach((side) => {
+    guard.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.32, 4, 8), std(0x27272a)).translateX(0.1 * side).translateY(0.55).translateZ(0.18).rotateX(Math.PI / 2));
+    guard.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.3, 4, 8), std(0x27272a)).translateX(0.1 * side).translateY(0.28).translateZ(0.36));
+  });
+  booth.add(guard);
+  group.add(booth);
+  const boothCentre = booth.position.clone();
+  colliders.push({ x: boothCentre.x, z: boothCentre.z, r: 1.15 });
+
+  // The quán just past the lot.
+  const q = route.at(Math.min(route.length - 6, lot.s + lot.halfLength + 12));
+  const shopYaw = Math.atan2(-q.rx, -q.rz);
+  const shopOffset = q.width / 2 + SIDEWALK[q.zone] + 5;
   const shop = new THREE.Mesh(new THREE.BoxGeometry(14, 7, 10), [std(0x6b6258), std(0x6b6258), std(0x3f3a36), std(0x3f3a36), std(0xe8c872, 0.85), std(0x6b6258)]);
-  const offset = f.width / 2 + SIDEWALK[f.zone] + 5;
-  shop.position.set(f.x + f.rx * offset, 3.5, f.z + f.rz * offset);
-  shop.rotation.y = yaw;
+  shop.position.set(q.x + q.rx * shopOffset, 3.5, q.z + q.rz * shopOffset);
+  shop.rotation.y = shopYaw;
   group.add(shop);
-  const sign = createNeonSign('QUÁN ỐC BỜ SÔNG', 'ỐC • SÒ • NGHÊU • BIA LẠNH');
-  sign.children.slice(1).forEach((pole) => sign.remove(pole));
-  sign.scale.setScalar(1.3);
-  const signOffset = f.width / 2 + SIDEWALK[f.zone] - 0.1;
-  sign.position.set(f.x + f.rx * signOffset, 4.6, f.z + f.rz * signOffset);
-  sign.rotation.y = yaw;
-  group.add(sign);
-  // Tables spilling onto the pavement.
+  const neon = createNeonSign('QUÁN ỐC BỜ SÔNG', 'ỐC • SÒ • NGHÊU • BIA LẠNH');
+  neon.children.slice(1).forEach((p) => neon.remove(p));
+  neon.scale.setScalar(1.3);
+  const signOffset = q.width / 2 + SIDEWALK[q.zone] - 0.1;
+  neon.position.set(q.x + q.rx * signOffset, 4.6, q.z + q.rz * signOffset);
+  neon.rotation.y = shopYaw;
+  group.add(neon);
   [-3, 3].forEach((along, i) => {
     const table = createStainlessTable();
     table.scale.setScalar(0.6);
-    const l = f.width / 2 + SIDEWALK[f.zone] * 0.5 + 0.1;
-    table.position.set(f.x + f.rx * l + f.tx * along, 0.15, f.z + f.rz * l + f.tz * along);
+    const l = q.width / 2 + SIDEWALK[q.zone] * 0.5 + 0.1;
+    table.position.set(q.x + q.rx * l + q.tx * along, 0.15, q.z + q.rz * l + q.tz * along);
     group.add(table);
     for (let k = 0; k < 3; k++) {
-      const stool = createPlasticStool(k % 2 ? 0xdc2626 : 0x0284c7);
+      const st = createPlasticStool(k % 2 ? 0xdc2626 : 0x0284c7);
       const a = (k / 3) * Math.PI * 2 + i;
-      stool.position.set(table.position.x + Math.cos(a) * 1.1, 0.15, table.position.z + Math.sin(a) * 1.1);
-      group.add(stool);
+      st.position.set(table.position.x + Math.cos(a) * 1.1, 0.15, table.position.z + Math.sin(a) * 1.1);
+      group.add(st);
     }
   });
-  // White chalk parking box on the road edge.
-  const box = new THREE.Group();
-  const line = new THREE.MeshBasicMaterial({ color: 0xf5f5f4 });
-  const w = 2.4;
-  const len = 4;
-  [
-    [0, -len / 2, w, 0.1],
-    [0, len / 2, w, 0.1],
-    [-w / 2, 0, 0.1, len],
-    [w / 2, 0, 0.1, len],
-  ].forEach(([x, z, sx, sz]) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz).rotateX(-Math.PI / 2), line);
-    m.position.set(x, 0, z);
-    box.add(m);
-  });
-  const l = f.width / 2 - 1.4;
-  box.position.set(f.x + f.rx * l, 0.02, f.z + f.rz * l);
-  box.rotation.y = Math.atan2(f.tx, f.tz);
-  group.add(box);
-  return group;
+
+  return {
+    group,
+    colliders,
+    lights,
+    marker,
+    /** The rider's bay outline + sign (only shown on the ride out). */
+    markerGroup,
+    /** Is (s, lateral) inside the lot (open ground, no wall)? */
+    contains: (s: number, lateral: number) => Math.abs(s - lot.s) <= lot.halfLength + 0.4 && lateral > edge - 0.3 && lateral < edge + lot.depth - 0.2,
+  };
 }
 
 // ------------------------------------------------------------------ the world
 
-export function createRideWorld(container: HTMLElement): RideWorld {
+export function createRideWorld(
+  container: HTMLElement,
+  options: { direction?: RideDirection; alcohol?: number; bikeId?: string } = {}
+): RideWorld {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
   renderer.setSize(container.clientWidth, container.clientHeight);
@@ -868,7 +1293,15 @@ export function createRideWorld(container: HTMLElement): RideWorld {
   scene.add(moon);
 
   const route = createRoute();
-  const { lamps } = buildTown(scene, route);
+  const { lamps, checkpoints, crossroads, lot } = buildTown(scene, route);
+  let direction: RideDirection = options.direction ?? 'outbound';
+  /** +1 riding toward the quán (increasing s), -1 riding home. */
+  const travel = () => (direction === 'outbound' ? 1 : -1);
+  const showCheckpoints = () => {
+    checkpoints.forEach((c) => (c.group.visible = !c.direction || c.direction === direction));
+    lot.markerGroup.visible = direction === 'outbound';
+  };
+  showCheckpoints();
 
   // Real point lights follow the lamps nearest the rider (the rest are pools + bloom).
   const LAMP_INTENSITY = 45;
@@ -879,7 +1312,7 @@ export function createRideWorld(container: HTMLElement): RideWorld {
   });
 
   // ---- Player bike ----
-  let spec: BikeSpec = RIDE_BIKES[0];
+  let spec: BikeSpec = RIDE_BIKES.find((b) => b.id === options.bikeId) ?? RIDE_BIKES[0];
   let model: RideBikeModel = createRideBike(spec);
   scene.add(model.root);
   const headlight = new THREE.SpotLight(0xfff1d6, 140, 55, 0.42, 0.55, 1.4);
@@ -934,7 +1367,13 @@ export function createRideWorld(container: HTMLElement): RideWorld {
   composer.addPass(new OutputPass());
 
   // ---- State ----
-  let alcohol = 0;
+  let alcohol = options.alcohol ?? 0;
+  let crashes = 0;
+  let ranRed = 0;
+  let fined = false;
+  let lastLightS = -1;
+  /** Seconds of protection from traffic after (re)spawning, so a respawn can't chain-crash. */
+  let grace = 0;
   let bike: BikeState = createBikeState();
   let routeIndex = 0;
   let lateral = 0;
@@ -971,11 +1410,35 @@ export function createRideWorld(container: HTMLElement): RideWorld {
       trafficEnabled = enabled;
       trafficGroup.visible = enabled;
     },
-    reset: () => placeAt(route.startS, false),
+    reset: (next) => {
+      if (next) {
+        direction = next;
+        showCheckpoints();
+      }
+      startTrip();
+    },
     telemetry: () => {
       const sample = route.samples[routeIndex];
+      const from = direction === 'outbound' ? route.startS : route.lot.s;
+      const goal = direction === 'outbound' ? route.lot.bays[route.lot.playerBay].s : route.startS;
+      const span = Math.abs(goal - from);
+      const left = Math.max(0, (goal - sample.s) * travel());
+      const stopS = crossroads.stopS(direction);
+      const toLight = (stopS - sample.s) * travel();
+      const lightNow = crossroads.light(clockTime);
+      const bay = route.lot.bays[route.lot.playerBay];
+      const bayPoint = route.at(bay.s);
+      const bayX = bayPoint.x + bayPoint.rx * bay.lateral;
+      const bayZ = bayPoint.z + bayPoint.rz * bay.lateral;
+      const bayDist = Math.hypot(bike.x - bayX, bike.z - bayZ);
       return {
-        speedKmh: bike.speed * 3.6,
+        direction,
+        light: toLight > -2 && toLight < 90 ? { ...lightNow, distance: Math.max(0, toLight) } : null,
+        bayDistance: direction === 'outbound' && bayDist < 60 ? bayDist : null,
+        ranRedLights: ranRed,
+        crashes,
+        speedKmh: Math.abs(bike.speed) * 3.6,
+        reversing: isReversing(bike),
         gear: bike.gear,
         rpm: bike.rpm,
         engineOn: bike.engineOn,
@@ -986,8 +1449,8 @@ export function createRideWorld(container: HTMLElement): RideWorld {
         blinkOn: Math.floor(clockTime * 2.5) % 2 === 0,
         horn,
         braking: input.brake > 0,
-        progress: Math.min(1, Math.max(0, (sample.s - route.startS) / (route.finishS - route.startS))),
-        distanceLeft: Math.max(0, route.finishS - sample.s),
+        progress: Math.min(1, Math.max(0, 1 - left / span)),
+        distanceLeft: direction === 'outbound' && bayDist < 25 ? bayDist : left,
         zone: ZONE_LABEL[sample.zone],
         lateral,
         roadHalfWidth: sample.width / 2,
@@ -1017,11 +1480,15 @@ export function createRideWorld(container: HTMLElement): RideWorld {
   };
   const emit = (text: string, kind: RideEventKind = 'info') => api.onEvent?.(text, kind);
 
-  /** Put the bike on the route at `s`, in the right-hand lane, facing along it. */
+  /** Put the bike on the route at `s`, in the right-hand lane for the trip, facing along it. */
   const placeAt = (s: number, keepEngine: boolean) => {
     const sample = route.at(s);
-    const lane = sample.zone === 'hem' ? 0.4 : sample.width / 4;
-    const fresh = createBikeState(sample.x + sample.rx * lane, sample.z + sample.rz * lane, Math.atan2(sample.tx, sample.tz));
+    const lane = (sample.zone === 'hem' ? 0.4 : sample.width / 4) * travel();
+    const fresh = createBikeState(
+      sample.x + sample.rx * lane,
+      sample.z + sample.rz * lane,
+      Math.atan2(sample.tx * travel(), sample.tz * travel())
+    );
     if (keepEngine) {
       fresh.engineOn = true;
       fresh.kickCount = spec.kickstartsNeeded;
@@ -1030,6 +1497,7 @@ export function createRideWorld(container: HTMLElement): RideWorld {
     bike = fresh;
     routeIndex = route.locate(bike.x, bike.z).index;
     firstFrame = true; // snap the camera instead of gliding across the map
+    grace = 1.5;
     if (!keepEngine) {
       elapsed = 0;
       timerRunning = false;
@@ -1037,10 +1505,26 @@ export function createRideWorld(container: HTMLElement): RideWorld {
       checkpointDone = false;
       hitEvents.clear();
       signal = 'off';
+      crashes = 0;
+      ranRed = 0;
+      fined = false;
+      lastLightS = -1;
     }
     history.length = 0;
   };
-  placeAt(route.startS, false);
+  /** Ride out: at the home gate. Ride home: standing in the bay, nose to the road, engine cold. */
+  const startTrip = () => {
+    if (direction === 'outbound') {
+      placeAt(route.startS, false);
+      return;
+    }
+    placeAt(route.lot.s, false);
+    const bay = route.lot.bays[route.lot.playerBay];
+    const p = route.at(bay.s);
+    bike = { ...bike, x: p.x + p.rx * bay.lateral, z: p.z + p.rz * bay.lateral, heading: Math.atan2(-p.rx, -p.rz) };
+    routeIndex = route.locate(bike.x, bike.z).index;
+  };
+  startTrip();
 
   // ---- Keyboard ----
   const handled = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyE', 'KeyF', 'KeyH', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyR']);
@@ -1130,12 +1614,19 @@ export function createRideWorld(container: HTMLElement): RideWorld {
     lateral = located.lateral;
     const sample = located.sample;
     const half = sample.width / 2;
-    const surface = Math.abs(lateral) > half ? 'sidewalk' : 'road';
+    // The parking lot is open, rideable ground at pavement height (beyond the pavement).
+    const inLot = lot.contains(sample.s, lateral);
+    const surface = Math.abs(lateral) > half && !inLot ? 'sidewalk' : 'road';
+    const raised = Math.abs(lateral) > half; // pavement or lot: 15 cm up
 
     if (bike.engineOn && !timerRunning && !finished && bike.speed > 0.5) timerRunning = true;
     const before = bike;
     bike = stepBike(bike, applied, { spec, dt, alcohol, time: clockTime, surface });
-    if (before.crashTime === null && bike.crashTime !== null) emit(CRASH_TEXT[bike.crashReason!], 'crash');
+    if (!isReversing(before) && isReversing(bike)) emit('↩️ Chống chân dắt lùi xe (thả S để dừng)', 'info');
+    if (before.crashTime === null && bike.crashTime !== null) {
+      crashes++;
+      emit(CRASH_TEXT[bike.crashReason!], 'crash');
+    }
 
     if (bike.crashTime === null) {
       // Curb: hopping up or down at speed.
@@ -1143,21 +1634,40 @@ export function createRideWorld(container: HTMLElement): RideWorld {
         bike = hitBump(bike, surface === 'sidewalk' ? 0.55 : 0.35);
         if (surface === 'sidewalk') emit('⚠️ Leo lề! Đi trên vỉa hè bị chậm và xóc', 'warn');
       }
-      // Walls / the river railing: hard stop, crash if fast.
+      // Walls / the river railing: hard stop, crash if fast (the lot is open ground).
       const wall = half + SIDEWALK[sample.zone] - 0.25;
-      if (Math.abs(lateral) > wall) {
+      if (Math.abs(lateral) > wall && !inLot) {
         if (bike.speed > 5) {
           bike = crash(bike, 'wall');
+          crashes++;
           emit(CRASH_TEXT.wall, 'crash');
         } else {
           const push = Math.abs(lateral) - wall;
           bike = { ...bike, x: bike.x - sample.rx * Math.sign(lateral) * push, z: bike.z - sample.rz * Math.sign(lateral) * push, speed: bike.speed * 0.5 };
         }
       }
-      // Potholes, speed humps, the checkpoint.
+      // Parked bikes and the lot's posts / booth.
+      lot.colliders.forEach((c) => {
+        const d = Math.hypot(bike.x - c.x, bike.z - c.z);
+        if (d >= c.r + 0.35 || bike.crashTime !== null) return;
+        if (bike.speed > 3.5) {
+          bike = crash(bike, 'traffic');
+          crashes++;
+          emit('💥 Tông vào xe người ta đang gửi!', 'crash');
+        } else {
+          const push = c.r + 0.35 - d;
+          bike = { ...bike, x: bike.x + ((bike.x - c.x) / (d || 1)) * push, z: bike.z + ((bike.z - c.z) / (d || 1)) * push, speed: 0 };
+        }
+      });
+      // Potholes, speed humps, the checkpoint (crossings counted in either direction).
+      const prevS = route.samples[prevIndex].s;
+      // A jump of more than a few metres is a respawn / teleport, not riding over things.
+      const crossed = (at: number) =>
+        Math.abs(sample.s - prevS) < 30 && ((prevS < at && sample.s >= at) || (prevS > at && sample.s <= at));
       route.events.forEach((event, i) => {
         const ds = sample.s - event.s;
-        if (event.kind === 'bump' && prevIndex < routeIndex && route.samples[prevIndex].s < event.s && sample.s >= event.s) {
+        if (event.direction && event.direction !== direction) return;
+        if (event.kind === 'bump' && crossed(event.s)) {
           const hard = bike.speed > 7;
           bike = hitBump(bike, hard ? 0.95 : 0.3);
           emit(hard ? '💥 Gờ giảm tốc! Bay người khỏi yên' : 'Gờ giảm tốc', hard ? 'warn' : 'info');
@@ -1167,8 +1677,9 @@ export function createRideWorld(container: HTMLElement): RideWorld {
           emit('🕳️ Sập ổ gà! Xóc nảy người', 'warn');
         } else if (event.kind === 'pothole' && Math.abs(ds) > 6) {
           hitEvents.delete(i);
-        } else if (event.kind === 'checkpoint' && !checkpointDone && sample.s > event.s) {
+        } else if (event.kind === 'checkpoint' && !checkpointDone && (sample.s - event.s) * travel() > 0 && Math.abs(ds) < 8) {
           checkpointDone = true;
+          fined = alcohol > 0;
           emit(
             alcohol > 0
               ? `🚨 CSGT thổi nồng độ cồn: ${breathalyzerReadingFor(alcohol)} — Bị lập biên bản!`
@@ -1177,24 +1688,40 @@ export function createRideWorld(container: HTMLElement): RideWorld {
           );
         }
       });
-      // Arrival at the quán.
-      if (!finished && sample.s >= route.finishS) {
-        if (bike.speed > 8) {
-          bike = crash(bike, 'sign');
-          emit(CRASH_TEXT.sign, 'crash');
-        } else if (bike.speed < 2.2) {
-          finished = true;
-          timerRunning = false;
-          bestTime = bestTime === null ? elapsed : Math.min(bestTime, elapsed);
-          emit(`🅿️ Tới quán sau ${elapsed.toFixed(1)} giây! Rút chìa khóa, vào nhậu thôi`, 'success');
+      // Traffic lights: crossing the stop line on red.
+      const stopS = crossroads.stopS(direction);
+      if (crossed(stopS) && (sample.s - stopS) * travel() > 0 && lastLightS !== stopS) {
+        lastLightS = stopS;
+        if (crossroads.light(clockTime).state === 'red') {
+          ranRed++;
+          emit('🚦 Vượt đèn đỏ! Camera phạt nguội đã ghi hình', 'warn');
         }
+      }
+      // Arrival: parked in the bay (ride out) or stopped at the home gate (ride home).
+      const arrive = (text: string) => {
+        finished = true;
+        timerRunning = false;
+        bestTime = bestTime === null ? elapsed : Math.min(bestTime, elapsed);
+        emit(text, 'success');
+        api.onArrive?.({ direction, time: elapsed, crashes, ranRedLights: ranRed, fined });
+      };
+      if (!finished && direction === 'outbound') {
+        const bay = route.lot.bays[route.lot.playerBay];
+        const b = route.at(bay.s);
+        const inBay = Math.abs(sample.s - bay.s) < 0.6 && Math.abs(lateral - bay.lateral) < 1.05;
+        if (inBay && Math.abs(bike.speed) < 0.8 && Math.hypot(bike.x - (b.x + b.rx * bay.lateral), bike.z - (b.z + b.rz * bay.lateral)) < 1.2) {
+          arrive(`🅿️ Đã gửi xe ô số ${route.lot.playerBay + 20} sau ${elapsed.toFixed(1)} giây — nhận vé, vào quán nhậu thôi!`);
+        }
+      } else if (!finished && direction === 'return' && sample.s <= route.startS + 2 && Math.abs(bike.speed) < 2.2) {
+        arrive(`🏠 Về tới nhà sau ${elapsed.toFixed(1)} giây! Dắt xe vào, khóa cửa sắt.`);
       }
     } else if (bike.crashTime > 2.6) {
       // Get up and carry on from where we fell.
-      placeAt(Math.max(route.startS, sample.s - 3), true);
+      placeAt(Math.min(route.length - 2, Math.max(route.startS, sample.s - 3 * travel())), true);
       emit('🩹 Dựng xe dậy, đi tiếp', 'info');
     }
     if (timerRunning) elapsed += dt;
+    grace = Math.max(0, grace - dt);
 
     // ---- Traffic ----
     if (trafficEnabled) {
@@ -1202,10 +1729,14 @@ export function createRideWorld(container: HTMLElement): RideWorld {
         const s = route.at(agent.s);
         const halfW = s.width / 2;
         const zoneLane = s.zone === 'hem' ? Math.sign(agent.lane) * 0.25 : agent.lane;
-        // Slow down behind the player when in the same lane.
+        // Slow down behind the player when in the same lane, and stop for red lights.
         const ahead = (route.samples[routeIndex].s - agent.s) * agent.dir;
         const sameLane = Math.abs(lateral - zoneLane * halfW) < 1.6;
-        const target = sameLane && ahead > 0 && ahead < 9 ? Math.max(0, bike.speed - 0.5) : s.zone === 'hem' ? agent.baseSpeed * 0.5 : agent.baseSpeed;
+        const agentStop = crossroads.stopS(agent.dir === 1 ? 'outbound' : 'return');
+        const toStop = (agentStop - agent.s) * agent.dir;
+        const redAhead = crossroads.light(clockTime).state !== 'green' && toStop > 0.5 && toStop < 18;
+        let target = sameLane && ahead > 0 && ahead < 9 ? Math.max(0, bike.speed - 0.5) : s.zone === 'hem' ? agent.baseSpeed * 0.5 : agent.baseSpeed;
+        if (redAhead) target = Math.min(target, Math.max(0, (toStop - 1.5) * 0.8));
         agent.speed += (target - agent.speed) * Math.min(1, dt * 2);
         agent.s += agent.speed * agent.dir * dt;
         if (agent.s > route.length - 5) agent.s = 140;
@@ -1215,21 +1746,33 @@ export function createRideWorld(container: HTMLElement): RideWorld {
         agent.z = here.z + here.rz * zoneLane * halfW;
         agent.object.position.set(agent.x, 0, agent.z);
         agent.object.rotation.y = Math.atan2(here.tx * agent.dir, here.tz * agent.dir);
-        if (bike.crashTime === null && Math.hypot(agent.x - bike.x, agent.z - bike.z) < agent.radius) {
+        if (grace === 0 && bike.crashTime === null && Math.hypot(agent.x - bike.x, agent.z - bike.z) < agent.radius) {
           bike = crash({ ...bike, speed: bike.speed * 0.6 }, 'traffic');
+          crashes++;
           emit(CRASH_TEXT.traffic, 'crash');
         }
       });
     }
 
+    // ---- Cross traffic at the junction ----
+    crossroads.update(clockTime, dt).forEach((a) => {
+      if (grace === 0 && bike.crashTime === null && Math.hypot(a.x - bike.x, a.z - bike.z) < 1.1) {
+        bike = crash({ ...bike, speed: bike.speed * 0.6 }, 'traffic');
+        crashes++;
+        emit('💥 Tông xe đang qua ngã tư!', 'crash');
+      }
+    });
+    // The rider's bay glows (and pulses) until parked.
+    lot.marker.emissiveIntensity = finished && direction === 'outbound' ? 0.6 : 2 + Math.sin(clockTime * 4) * 1.2;
+
     // ---- Bike visuals ----
-    surfaceY += ((bike.surface === 'sidewalk' ? 0.15 : 0) - surfaceY) * Math.min(1, dt * 12);
+    surfaceY += ((raised ? 0.15 : 0) - surfaceY) * Math.min(1, dt * 12);
     const bob = Math.sin(clockTime * 40) * bike.jolt * 0.05;
     model.root.position.set(bike.x, surfaceY + bob, bike.z);
     model.root.rotation.set(0, bike.heading, 0);
     model.lean.rotation.z = bike.lean;
     model.lean.rotation.x = -bike.jolt * 0.08;
-    model.steer.rotation.y = -bike.steer * (0.5 / (1 + bike.speed * 0.25));
+    model.steer.rotation.y = -bike.steer * (0.5 / (1 + Math.abs(bike.speed) * 0.25));
     wheelSpin += (bike.speed / 0.31) * dt;
     model.frontWheel.rotation.x = wheelSpin;
     model.rearWheel.rotation.x = wheelSpin;
@@ -1261,8 +1804,9 @@ export function createRideWorld(container: HTMLElement): RideWorld {
     const sway = drunk * 0.35;
     model.riderBody.forEach((o) => (o.visible = cameraMode === 'tpp'));
     if (cameraMode === 'tpp') {
-      const back = 4.4 + bike.speed * 0.06;
-      camPos.set(bike.x, surfaceY + 2.0 + bike.speed * 0.02, bike.z).addScaledVector(forward, -back);
+      const speed = Math.max(0, bike.speed);
+      const back = 4.4 + speed * 0.06;
+      camPos.set(bike.x, surfaceY + 2.0 + speed * 0.02, bike.z).addScaledVector(forward, -back);
       camLook.set(bike.x, surfaceY + 1.1, bike.z).addScaledVector(forward, 3.5);
       camera.position.lerp(camPos, firstFrame ? 1 : 1 - Math.exp(-dt * 6));
       lookSmoothed.lerp(camLook, firstFrame ? 1 : 1 - Math.exp(-dt * 10));
@@ -1279,7 +1823,7 @@ export function createRideWorld(container: HTMLElement): RideWorld {
       camera.lookAt(camLook);
       camera.rotateZ(-bike.lean * 0.85 + Math.sin(clockTime * 1.4) * sway * 0.2);
     }
-    camera.fov = 62 + bike.speed * 0.55 + Math.sin(clockTime * 0.9) * drunk * 4;
+    camera.fov = 62 + Math.max(0, bike.speed) * 0.55 + Math.sin(clockTime * 0.9) * drunk * 4;
     camera.updateProjectionMatrix();
     firstFrame = false;
 

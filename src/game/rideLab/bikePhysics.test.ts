@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RIDE_BIKES, createBikeState, gearTopMs, kickstart, stepBike, toggleKickstand, type BikeInput, type BikeState } from './bikePhysics';
+import { REVERSE, RIDE_BIKES, createBikeState, gearTopMs, kickstart, stepBike, toggleKickstand, type BikeInput, type BikeState } from './bikePhysics';
 
 const spec = RIDE_BIKES[0];
 const run = (state: BikeState, input: BikeInput, seconds: number, alcohol = 0) => {
@@ -36,10 +36,15 @@ test('full throttle climbs through the gears and stays under top speed', () => {
   assert.ok(Math.abs(s.x) < 0.01, 'goes straight without steering');
 });
 
-test('braking stops the bike', () => {
-  const moving = run(ready(), { throttle: 1, brake: 0, steer: 0 }, 6);
-  const stopped = run(moving, { throttle: 0, brake: 1, steer: 0 }, 6);
-  assert.equal(stopped.speed, 0);
+test('braking stops the bike (and holds it at 0 before any paddling back)', () => {
+  let s = run(ready(), { throttle: 1, brake: 0, steer: 0 }, 6);
+  let stoppedAt = -1;
+  for (let t = 0; t < 4; t += 1 / 60) {
+    s = stepBike(s, { throttle: 0, brake: 1, steer: 0 }, { spec, dt: 1 / 60, alcohol: 0, time: t, surface: 'road' });
+    if (s.speed === 0 && stoppedAt < 0) stoppedAt = t;
+    if (s.speed < 0) break;
+  }
+  assert.ok(stoppedAt > 0, 'reached a standstill');
 });
 
 test('steering right turns toward -X and leans right', () => {
@@ -72,4 +77,40 @@ test('a drunk rider drifts with hands off the bars', () => {
   const sober = run(moving, { throttle: 0.4, brake: 0, steer: 0 }, 3, 0);
   const drunk = run(moving, { throttle: 0.4, brake: 0, steer: 0 }, 3, 90);
   assert.ok(Math.abs(drunk.x - moving.x) > Math.abs(sober.x - moving.x) + 0.3);
+});
+
+test('holding the brake at a standstill paddles the bike backward at walking pace', () => {
+  const stopped = ready();
+  const brief = run(stopped, { throttle: 0, brake: 1, steer: 0 }, REVERSE.delay * 0.6);
+  assert.equal(brief.speed, 0, 'a short brake tap does not reverse');
+  const backing = run(stopped, { throttle: 0, brake: 1, steer: 0 }, 4);
+  assert.ok(backing.speed < 0, 'rolls backward');
+  assert.ok(backing.speed >= -REVERSE.maxSpeed - 1e-9, 'no faster than walking pace');
+  assert.ok(backing.z < -1, 'moved back along -Z');
+  assert.equal(backing.gear, 0, 'gear reads R');
+});
+
+test('paddling backward works with the engine off', () => {
+  const backing = run(createBikeState(), { throttle: 0, brake: 1, steer: 0 }, 3);
+  assert.ok(backing.z < -0.5);
+});
+
+test('releasing the brake stops the backward roll, throttle then goes forward', () => {
+  const backing = run(ready(), { throttle: 0, brake: 1, steer: 0 }, 3);
+  const halted = run(backing, { throttle: 0, brake: 0, steer: 0 }, 1);
+  assert.equal(halted.speed, 0);
+  const forward = run(halted, { throttle: 1, brake: 0, steer: 0 }, 2);
+  assert.ok(forward.speed > 2);
+});
+
+test('steering while backing up swings the heading the other way', () => {
+  const backing = run(ready(), { throttle: 0, brake: 1, steer: 0 }, 2);
+  const turned = run(backing, { throttle: 0, brake: 1, steer: 1 }, 1.5);
+  assert.ok(turned.heading > backing.heading, 'right bar + reverse turns the nose left (toward +X)');
+});
+
+test('braking from speed comes to a stop before any reversing', () => {
+  const moving = run(ready(), { throttle: 1, brake: 0, steer: 0 }, 5);
+  const brakedBriefly = run(moving, { throttle: 0, brake: 1, steer: 0 }, 0.5);
+  assert.ok(brakedBriefly.speed >= 0);
 });

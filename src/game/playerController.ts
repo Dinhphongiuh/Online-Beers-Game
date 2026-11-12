@@ -31,9 +31,26 @@ export interface PlayerBounds {
   groundY: (x: number, z: number) => number;
 }
 
+/** Something the player can use when standing near it (e.g. [G] to take the bike). */
+export interface Interaction {
+  x: number;
+  z: number;
+  radius: number;
+  /** KeyboardEvent.code, e.g. 'KeyG'. */
+  key: string;
+  /** Shown as the hint while in range. */
+  label: string;
+  onTrigger: () => void;
+}
+
 export interface PlayerController {
   readonly enabled: boolean;
   setEnabled: (enabled: boolean) => void;
+  /** Ignore the keyboard for a while (another view has it) without leaving play mode. */
+  setSuspended: (suspended: boolean) => void;
+  /** Stand the character at a spot (leaving any stool). */
+  spawnAt: (x: number, z: number, facing: number) => void;
+  interactions: Interaction[];
   /** Moves the character; `cameraForward` is the camera's look direction. */
   update: (delta: number, cameraForward: THREE.Vector3) => void;
   /** Short hint for the UI ("Nhấn E để ngồi" …). */
@@ -160,9 +177,22 @@ export function createPlayerController(options: {
   const isKey = (code: string, group: string[]) => group.includes(code);
   const held = (group: string[]) => group.some((code) => pressed.has(code));
 
+  let suspended = false;
+  const nearInteraction = () =>
+    seat === null
+      ? controller.interactions.find((i) => Math.hypot(i.x - root.position.x, i.z - root.position.z) < i.radius)
+      : undefined;
   const onKeyDown = (event: KeyboardEvent) => {
+    if (suspended) return;
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+    const near = nearInteraction();
+    if (near && event.code === near.key && !event.repeat) {
+      event.preventDefault();
+      pressed.clear();
+      near.onTrigger();
+      return;
+    }
     if (!HANDLED.has(event.code)) return;
     event.preventDefault(); // arrows would scroll the page
     if (event.code === 'KeyE' && !event.repeat) {
@@ -243,8 +273,22 @@ export function createPlayerController(options: {
         14,
         delta
       );
-      setStatus(nearestFreeSeat() >= 0 ? 'Nhấn E để ngồi xuống ghế' : 'WASD / mũi tên: đi • Shift: chạy • E: ngồi');
+      const near = nearInteraction();
+      setStatus(
+        near ? near.label : nearestFreeSeat() >= 0 ? 'Nhấn E để ngồi xuống ghế' : 'WASD / mũi tên: đi • Shift: chạy • E: ngồi'
+      );
     },
+    setSuspended: (value) => {
+      suspended = value;
+      pressed.clear();
+    },
+    spawnAt: (x, z, facing) => {
+      seat = null;
+      root.position.set(x, 0, z);
+      root.rotation.y = facing;
+      state.pose = 'standing';
+    },
+    interactions: [],
     dispose: () => controller.setEnabled(false),
   };
   return controller;

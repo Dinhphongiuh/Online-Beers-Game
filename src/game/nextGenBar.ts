@@ -123,6 +123,17 @@ export interface NextGenBar {
   setPlayMode: (enabled: boolean) => void;
   /** Control hints while playing ("Nhấn E để ngồi" …). */
   onPlayerStatus?: (status: string) => void;
+  /**
+   * Stop / restart rendering and the keyboard while another view (the ride) is on
+   * screen. Characters and state stay as they are.
+   */
+  setPaused: (paused: boolean) => void;
+  /** Just ridden in: play mode on, standing beside the bike in the parking lot. */
+  arriveByBike: () => void;
+  /** Which bike is parked in the player's bay. */
+  setBike: (bikeId: string) => void;
+  /** Fired when the player presses G beside their bike in the lot. */
+  onRideHome?: () => void;
   onStats?: (fps: number) => void;
   dispose: () => void;
 }
@@ -335,6 +346,7 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   let player: PlayerController | null = null;
   let playerCharacter: VrmCharacter | null = null;
   let playRequested = false;
+  let pendingArrival = false;
   const vrmLoader = createWebGPUVrmLoader();
   const seatCharacter = async (
     url: string,
@@ -370,7 +382,19 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
           bounds: scenery.bounds,
         });
         player.onStatus = (status) => api.onPlayerStatus?.(status);
+        player.interactions.push({
+          x: scenery.parking.bike.x,
+          z: scenery.parking.bike.z,
+          radius: 1.8,
+          key: 'KeyG',
+          label: '🛵 Nhấn G: lấy xe chạy về nhà',
+          onTrigger: () => api.onRideHome?.(),
+        });
         player.setEnabled(playRequested);
+        if (pendingArrival) {
+          pendingArrival = false;
+          api.arriveByBike();
+        }
       }
     } catch (error) {
       console.warn('[next-gen bar] character failed to load', url, error);
@@ -472,7 +496,9 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   )
     .then(loadWaitress)
     .then(() => loadStaff(MALE, house.staff.cook, { height: 1.66, outfit: outfit({ top: '#f8fafc', bottom: '#1f2937' }, ['headband']) }))
-    .then(() => loadStaff(FEMALE, house.staff.cashier, { height: 1.55, outfit: outfit({ top: '#be123c', hair: '#1c1917' }) }));
+    .then(() => loadStaff(FEMALE, house.staff.cashier, { height: 1.55, outfit: outfit({ top: '#be123c', hair: '#1c1917' }) }))
+    // The parking attendant by his booth.
+    .then(() => loadStaff(MALE, scenery.parking.attendantSpot, { height: 1.6, outfit: outfit({ top: '#f97316', bottom: '#1f2937' }, ['cap']) }));
   const waitressStep = new THREE.Vector3();
   const updateWaitress = (delta: number) => {
     if (!waitress) return;
@@ -521,7 +547,7 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   // Keep the orbit centre on the embankment so the camera can't wander off the map.
   const targetLimit = new THREE.Box3(
     new THREE.Vector3(-14, 0.3, -5),
-    new THREE.Vector3(14, 3, scenery.house.interior.max.z) // up to the back of the house
+    new THREE.Vector3(28, 3, scenery.house.interior.max.z) // up to the back of the house, east to the parking lot
   );
   controls.update();
 
@@ -658,6 +684,28 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
         z: +(targetZ - centerZ * scale).toFixed(2),
       };
     },
+    setPaused: (paused) => {
+      renderer.setAnimationLoop(paused ? null : loop);
+      if (!paused) clock.getDelta(); // don't jump the animation by the paused time
+      player?.setSuspended(paused);
+    },
+    arriveByBike: () => {
+      if (!player || !playerCharacter) {
+        pendingArrival = true; // the player model is still loading
+        return;
+      }
+      playRequested = true;
+      player.setEnabled(true);
+      const spot = scenery.parking.arrivalSpot;
+      player.spawnAt(spot.x, spot.z, spot.facing);
+      // Snap the follow camera down the lot's aisle (under the roof, clear of the booth),
+      // so both the rider and the bike are in view.
+      controls.target.set(spot.x, 1.1, spot.z + 0.4);
+      camera.position.set(spot.x + 4.2, 2.1, spot.z - 0.8);
+      controls.update();
+      api.onPlayerStatus?.('🍻 Đã gửi xe. Đi vào quán thôi! (G cạnh xe để chạy về)');
+    },
+    setBike: (bikeId) => scenery.parking.setPlayerBike(bikeId),
     setPlayMode: (enabled) => {
       playRequested = enabled;
       player?.setEnabled(enabled);
@@ -691,7 +739,7 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   const characterProbe = new THREE.Vector3();
   // Each table toasts on its own rhythm.
   const cheersTimers = new Map<number, number>();
-  renderer.setAnimationLoop(() => {
+  const loop = () => {
     const rawDelta = clock.getDelta();
     const delta = Math.min(rawDelta, 0.05);
     if (player?.enabled) {
@@ -750,7 +798,8 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
       frames = 0;
       fpsTime = 0;
     }
-  });
+  };
+  renderer.setAnimationLoop(loop);
 
   const observer = new ResizeObserver(() => {
     if (!container.clientWidth || !container.clientHeight) return;

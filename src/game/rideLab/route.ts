@@ -1,5 +1,6 @@
 /**
- * The Ride Lab route: home alley → main street → riverside → the quán.
+ * The Ride Lab route: home alley → main street → crossroads with traffic lights →
+ * second street → riverside → the quán's parking lot (≈1.4 km).
  *
  * A Catmull-Rom curve through hand-placed points, sampled every metre. Each sample
  * carries the road width and zone so the world can build the road and the physics
@@ -25,13 +26,27 @@ const CONTROL: { x: number; z: number; width: number; zone: Zone }[] = [
   { x: 230, z: 170, width: 10, zone: 'duong' },
   { x: 280, z: 220, width: 10, zone: 'duong' },
   { x: 292, z: 300, width: 10, zone: 'duong' },
-  { x: 270, z: 380, width: 10, zone: 'duong' },
-  { x: 220, z: 432, width: 9, zone: 'bo_ke' },
-  { x: 140, z: 452, width: 8, zone: 'bo_ke' },
-  { x: 60, z: 444, width: 8, zone: 'bo_ke' },
-  { x: 0, z: 424, width: 8, zone: 'bo_ke' },
-  { x: -20, z: 416, width: 8, zone: 'bo_ke' },
+  // A straight run through the crossroads.
+  { x: 294, z: 360, width: 10, zone: 'duong' },
+  { x: 296, z: 420, width: 10, zone: 'duong' },
+  { x: 310, z: 500, width: 10, zone: 'duong' },
+  { x: 360, z: 560, width: 10, zone: 'duong' },
+  { x: 440, z: 590, width: 10, zone: 'duong' },
+  { x: 530, z: 600, width: 9, zone: 'duong' },
+  { x: 610, z: 612, width: 8, zone: 'bo_ke' },
+  { x: 690, z: 630, width: 8, zone: 'bo_ke' },
+  { x: 770, z: 628, width: 8, zone: 'bo_ke' },
+  { x: 840, z: 610, width: 8, zone: 'bo_ke' },
+  { x: 900, z: 592, width: 8, zone: 'bo_ke' },
+  { x: 960, z: 584, width: 8, zone: 'bo_ke' },
+  { x: 1000, z: 582, width: 8, zone: 'bo_ke' },
 ];
+
+/** Where the cross street meets the main street (traffic lights). */
+const CROSSROADS = { x: 294, z: 360 };
+
+/** Which way the ride goes: to the quán, or back home after drinking. */
+export type RideDirection = 'outbound' | 'return';
 
 export interface RouteSample {
   /** Metres from the start. */
@@ -53,17 +68,35 @@ export interface RouteSample {
 export interface RoadEvent {
   kind: 'pothole' | 'bump' | 'checkpoint';
   s: number;
+  /** Only active on this trip (the checkpoint waits for people riding home). */
+  direction?: RideDirection;
   /** Lateral offset from the centre line (m), + = right. Bumps span the road. */
   lateral: number;
   radius: number;
 }
 
+export interface ParkingLot {
+  /** Centre of the lot along the route. */
+  s: number;
+  /** Lot extent along the route (± from s) and its depth beyond the pavement. */
+  halfLength: number;
+  depth: number;
+  /** Bays: position along the route, lateral offset, row (0 = nearest the road). */
+  bays: { s: number; lateral: number; row: number }[];
+  /** Index into `bays` of the free bay the rider parks in (and leaves from). */
+  playerBay: number;
+}
+
 export interface Route {
   samples: RouteSample[];
   length: number;
-  /** Where the ride starts (outside the house) and where the quán's parking box is. */
+  /** The home gate (start of the ride out, end of the ride home). */
   startS: number;
+  /** The parking lot entrance (end of the ride out). */
   finishS: number;
+  /** Centre of the crossroads along the route. */
+  crossroadsS: number;
+  lot: ParkingLot;
   events: RoadEvent[];
   /** Nearest sample to (x, z), searching around `hint` first. */
   locate: (x: number, z: number, hint?: number) => { index: number; sample: RouteSample; lateral: number };
@@ -139,21 +172,36 @@ export function createRoute(): Route {
   };
 
   const startS = 12;
-  const finishS = length - 22;
+  // Parking lot just before the quán at the end of the riverside.
+  const lotS = length - 40;
+  const lot: ParkingLot = { s: lotS, halfLength: 8, depth: 9, bays: [], playerBay: 0 };
+  const lotSample = at(lotS);
+  const edge = lotSample.width / 2 + SIDEWALK[lotSample.zone];
+  [edge + 1.8, edge + 6.4].forEach((lateral, row) => {
+    for (let k = -6; k <= 6; k++) lot.bays.push({ s: lotS + k * 1.15, lateral, row });
+  });
+  lot.playerBay = lot.bays.findIndex((b) => b.row === 0 && Math.abs(b.s - (lotS + 1.15)) < 0.01);
+  const finishS = lotS - lot.halfLength;
+  const crossroadsS = locate(CROSSROADS.x, CROSSROADS.z).sample.s;
+
   const events: RoadEvent[] = [
     // Alley: speed humps the residents poured themselves, a couple of potholes.
     { kind: 'bump', s: 45, lateral: 0, radius: 0.5 },
     { kind: 'pothole', s: 78, lateral: 0.8, radius: 0.55 },
     { kind: 'bump', s: 115, lateral: 0, radius: 0.5 },
-    // Main street.
+    // First street.
     { kind: 'pothole', s: 230, lateral: 2.4, radius: 0.7 },
     { kind: 'pothole', s: 310, lateral: -1.2, radius: 0.6 },
     { kind: 'pothole', s: 420, lateral: 2.8, radius: 0.8 },
-    { kind: 'pothole', s: 505, lateral: 1.6, radius: 0.6 },
-    { kind: 'bump', s: 600, lateral: 0, radius: 0.6 },
-    // Riverside: a police checkpoint before the quán.
-    { kind: 'pothole', s: 690, lateral: 1.4, radius: 0.6 },
-    { kind: 'checkpoint', s: finishS - 110, lateral: 2, radius: 3 },
+    // Second street.
+    { kind: 'pothole', s: crossroadsS + 90, lateral: 1.6, radius: 0.6 },
+    { kind: 'pothole', s: crossroadsS + 170, lateral: -2.2, radius: 0.7 },
+    { kind: 'bump', s: crossroadsS + 260, lateral: 0, radius: 0.6 },
+    // Riverside.
+    { kind: 'pothole', s: length - 300, lateral: 1.4, radius: 0.6 },
+    { kind: 'pothole', s: length - 180, lateral: -1.6, radius: 0.6 },
+    // The police wait at the mouth of the alley for people riding home after a drink.
+    { kind: 'checkpoint', s: 200, lateral: -2, radius: 3, direction: 'return' },
   ];
-  return { samples, length, startS, finishS, events, locate, at };
+  return { samples, length, startS, finishS, crossroadsS, lot, events, locate, at };
 }

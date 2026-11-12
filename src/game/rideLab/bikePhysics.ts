@@ -5,6 +5,8 @@
  * it can lean (tan(lean) = v²κ / g), so turns tighten at low speed and widen at high
  * speed, and the bike leans into them. Semi-automatic 4-speed gearbox with RPM,
  * kickstart, kickstand, crashes, and drunk riding (handlebar drift, sluggish hands).
+ * No reverse gear: holding the brake at a standstill makes the rider paddle the bike
+ * backward with their feet, at walking pace (engine on or off).
  *
  * Pure (no DOM / three.js) so it can run under node:test.
  */
@@ -83,7 +85,7 @@ export interface BikeState {
   z: number;
   /** Radians; 0 = +Z, positive turns toward +X (left). */
   heading: number;
-  /** m/s, never negative (no reverse). */
+  /** m/s; negative while the rider paddles backward with their feet. */
   speed: number;
   /** Radians, positive = leaning right. */
   lean: number;
@@ -101,7 +103,14 @@ export interface BikeState {
   crashReason: CrashReason | null;
   /** Suspension compression from bumps, decays to 0 (visual + camera). */
   jolt: number;
+  /** Seconds the brake has been held at a standstill (paddling back starts after a moment). */
+  reverseHold: number;
 }
+
+/** Paddling backward: top speed (m/s), how long to hold the brake first, accel / stop rates. */
+export const REVERSE = { maxSpeed: 1.3, delay: 0.5, accel: 1.4, stop: 3.5 };
+
+export const isReversing = (state: BikeState) => state.speed < -0.02;
 
 export interface BikeInput {
   throttle: number; // 0..1
@@ -135,6 +144,7 @@ export const createBikeState = (x = 0, z = 0, heading = 0): BikeState => ({
   crashTime: null,
   crashReason: null,
   jolt: 0,
+  reverseHold: 0,
 });
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -189,24 +199,32 @@ export function stepBike(state: BikeState, input: BikeInput, options: StepOption
   s.steer = approach(s.steer, steerTarget, 7 - drunk * 4, dt);
 
   // ---- Longitudinal ----
-  const vmax = gearTopMs(spec, spec.gearTopKmh.length);
-  let accel = 0;
-  if (s.engineOn && !s.kickstandDown) {
-    const headroom = clamp(1 - s.speed / vmax, 0, 1);
-    accel += input.throttle * spec.accel * Math.pow(headroom, 0.6);
-  } else if (s.engineOn && s.kickstandDown && input.throttle > 0) {
-    // Riding with the stand down: it drags, but you can move.
-    accel += input.throttle * spec.accel * 0.5 * clamp(1 - s.speed / 5, 0, 1);
+  // Brake held at a standstill (no throttle) → feet down, paddle it backward.
+  const paddle = input.brake > 0 && input.throttle === 0 && s.speed <= 0.05;
+  s.reverseHold = paddle ? s.reverseHold + dt : 0;
+  if (s.speed < 0 || s.reverseHold > REVERSE.delay) {
+    const target = paddle ? -REVERSE.maxSpeed : 0;
+    s.speed = target < s.speed ? Math.max(target, s.speed - REVERSE.accel * dt) : Math.min(target, s.speed + REVERSE.stop * dt);
+  } else {
+    const vmax = gearTopMs(spec, spec.gearTopKmh.length);
+    let accel = 0;
+    if (s.engineOn && !s.kickstandDown) {
+      const headroom = clamp(1 - s.speed / vmax, 0, 1);
+      accel += input.throttle * spec.accel * Math.pow(headroom, 0.6);
+    } else if (s.engineOn && s.kickstandDown && input.throttle > 0) {
+      // Riding with the stand down: it drags, but you can move.
+      accel += input.throttle * spec.accel * 0.5 * clamp(1 - s.speed / 5, 0, 1);
+    }
+    accel -= input.brake * spec.brake;
+    // Rolling resistance + air drag (+ much more on the pavement's broken tiles).
+    accel -= 0.25 + 0.0045 * s.speed * s.speed + (surface === 'sidewalk' ? 1.6 : 0);
+    s.speed = Math.max(0, s.speed + accel * dt);
   }
-  accel -= input.brake * spec.brake;
-  // Rolling resistance + air drag (+ much more on the pavement's broken tiles).
-  accel -= 0.25 + 0.0045 * s.speed * s.speed + (surface === 'sidewalk' ? 1.6 : 0);
-  s.speed = Math.max(0, s.speed + accel * dt);
 
-  // ---- Gearbox (semi-automatic: shifts by road speed) ----
+  // ---- Gearbox (semi-automatic: shifts by road speed); 0 = paddling backward ----
   let gear = 1;
   while (gear < spec.gearTopKmh.length && s.speed > gearTopMs(spec, gear) * 0.92) gear++;
-  s.gear = gear;
+  s.gear = isReversing(s) ? 0 : gear;
   const low = gear > 1 ? gearTopMs(spec, gear - 1) * 0.7 : 0;
   const band = clamp((s.speed - low) / (gearTopMs(spec, gear) - low), 0, 1);
   s.rpm = s.engineOn ? approach(s.rpm, 0.16 + band * 0.8 + input.throttle * 0.06, 8, dt) : approach(s.rpm, 0, 3, dt);

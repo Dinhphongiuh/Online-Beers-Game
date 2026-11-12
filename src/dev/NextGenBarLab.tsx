@@ -3,6 +3,10 @@
  * Gaussian splat backdrop. Effects can be toggled to compare quality and FPS.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { RideView } from './RideLab';
+import { RIDE_BIKES } from '../game/rideLab/bikePhysics';
+import type { RideDirection } from '../game/rideLab/route';
+import type { CameraMode } from '../game/rideLab/rideWorld';
 import {
   DEFAULT_NEXTGEN_EFFECTS,
   DEFAULT_SPLAT_TRANSFORM,
@@ -51,6 +55,12 @@ export const NextGenBarLab: React.FC = () => {
   const [splatResolution, setSplatResolution] = useState(0.6);
   const [playMode, setPlayMode] = useState(false);
   const [playerStatus, setPlayerStatus] = useState('');
+  // Riding to / from the quán (the bar pauses while the ride is on screen).
+  const [journey, setJourney] = useState<RideDirection | null>(null);
+  const [rideBike, setRideBike] = useState(RIDE_BIKES[0].id);
+  const [rideCamera, setRideCamera] = useState<CameraMode>('tpp');
+  const [homeAlcohol, setHomeAlcohol] = useState(55);
+  const [journeyNote, setJourneyNote] = useState('');
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -67,6 +77,8 @@ export const NextGenBarLab: React.FC = () => {
         barRef.current = created;
         created.onStats = setFps;
         created.onPlayerStatus = setPlayerStatus;
+        // [G] beside the bike in the parking lot: ride home.
+        created.onRideHome = () => setJourney('return');
         setBackend(created.backend);
         setStatus({ kind: 'ready' });
         if (created.backend !== 'webgpu') {
@@ -106,6 +118,26 @@ export const NextGenBarLab: React.FC = () => {
   useEffect(() => {
     barRef.current?.setPlayMode(playMode);
   }, [playMode, status.kind]);
+
+  useEffect(() => {
+    barRef.current?.setPaused(journey !== null);
+  }, [journey, status.kind]);
+
+  useEffect(() => {
+    barRef.current?.setBike(rideBike);
+  }, [rideBike, status.kind]);
+
+  /** Parked at the quán: back to the bar, standing beside the bike. */
+  const enterBar = () => {
+    setJourney(null);
+    barRef.current?.arriveByBike();
+    setPlayMode(true);
+    setJourneyNote('🅿️ Đã gửi xe ô số 27. Đi bộ vào quán; tới cạnh xe nhấn G để chạy về.');
+  };
+  const leaveRide = (note: string) => {
+    setJourney(null);
+    setJourneyNote(note);
+  };
 
   const loadFile = async (file: File | undefined) => {
     if (!file || !barRef.current) return;
@@ -149,9 +181,101 @@ export const NextGenBarLab: React.FC = () => {
             <p className="max-w-sm text-center text-sm font-bold text-rose-300">❌ {status.message}</p>
           </div>
         )}
+        {journey && (
+          <div className="absolute inset-0 z-10" data-testid="nextgen-journey">
+            <RideView
+              key={journey}
+              direction={journey}
+              alcohol={journey === 'return' ? homeAlcohol : 0}
+              bikeId={rideBike}
+              cameraMode={rideCamera}
+              traffic
+              onCameraChange={setRideCamera}
+              renderArrival={(result, rideAgain) =>
+                result.direction === 'outbound' ? (
+                  <>
+                    <button onClick={enterBar} className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-black text-zinc-950" data-testid="journey-enter-bar">
+                      Vào quán nhậu 🍻
+                    </button>
+                    <button onClick={rideAgain} className="rounded-xl border border-zinc-600 px-3 py-2 text-xs font-black text-zinc-200">
+                      Chạy lại
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() =>
+                        leaveRide(
+                          result.fined
+                            ? '🚨 Về tới nhà nhưng dính chốt CSGT ở đầu hẻm. Lần sau gọi xe ôm!'
+                            : '🏠 Về tới nhà an toàn. Ngủ ngon!'
+                        )
+                      }
+                      className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950"
+                    >
+                      Quay lại quán
+                    </button>
+                    <button onClick={rideAgain} className="rounded-xl border border-zinc-600 px-3 py-2 text-xs font-black text-zinc-200">
+                      Chạy lại
+                    </button>
+                  </>
+                )
+              }
+            />
+            <button
+              onClick={() => leaveRide('')}
+              className="absolute left-2 top-14 z-20 rounded-lg border border-zinc-600 bg-black/70 px-2 py-1 text-[11px] font-black text-zinc-200 hover:border-amber-400"
+            >
+              ✕ Bỏ chuyến, về quán
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="md:w-72 shrink-0 space-y-3 text-sm overflow-y-auto">
+        <div className="rounded-xl border border-sky-700/60 bg-sky-950/40 p-2.5 space-y-1.5" data-testid="nextgen-journey-panel">
+          <span className="text-[11px] font-black uppercase tracking-wider text-sky-300">🛵 Đi lại bằng xe máy</span>
+          <div className="flex flex-wrap gap-1">
+            {RIDE_BIKES.map((b) => (
+              <button key={b.id} className={pill(rideBike === b.id)} onClick={() => setRideBike(b.id)} title={b.subtitle}>
+                {b.name}
+              </button>
+            ))}
+          </div>
+          <button
+            data-testid="journey-outbound"
+            disabled={status.kind !== 'ready'}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              setJourney('outbound');
+            }}
+            className="w-full rounded-lg border border-sky-500 bg-sky-500/15 py-1.5 text-xs font-black text-sky-100 hover:bg-sky-500/30 disabled:opacity-40"
+          >
+            🛵 Chạy xe đi nhậu (Nhà → Quán)
+          </button>
+          <button
+            data-testid="journey-return"
+            disabled={status.kind !== 'ready'}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              setJourney('return');
+            }}
+            className="w-full rounded-lg border border-rose-500 bg-rose-500/15 py-1.5 text-xs font-black text-rose-100 hover:bg-rose-500/30 disabled:opacity-40"
+          >
+            🛵 Chạy xe về (Quán → Nhà)
+          </button>
+          <label className="block">
+            <span className="flex justify-between text-[10px] font-bold text-sky-100">
+              <span>Độ say khi về</span>
+              <span>{homeAlcohol}</span>
+            </span>
+            <input type="range" min={0} max={100} value={homeAlcohol} onChange={(e) => setHomeAlcohol(Number(e.target.value))} className="w-full accent-rose-400" />
+          </label>
+          <p className="text-[10px] leading-snug text-sky-100/70">
+            Đi nhậu: ~1,4 km qua hẻm, ngã tư có đèn, bờ kè; gửi xe vào ô xanh ở bãi giữ xe rồi vào quán. Về: tới cạnh xe ở bãi (ô số 27) nhấn <b>G</b>, hoặc bấm nút trên. Đứng yên giữ <b>S</b> để chống chân lùi xe.
+          </p>
+          {journeyNote && <p className="rounded-lg bg-black/40 px-2 py-1 text-[11px] font-bold text-amber-100">{journeyNote}</p>}
+        </div>
         <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-2.5 space-y-1.5">
           <button
             data-testid="nextgen-play-toggle"
