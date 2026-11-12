@@ -13,6 +13,7 @@ const VrmCharacterLab = lazy(() =>
 const NextGenBarLab = lazy(() =>
   import('./NextGenBarLab').then((module) => ({ default: module.NextGenBarLab }))
 );
+const UiLab = lazy(() => import('./UiLab').then((module) => ({ default: module.UiLab })));
 
 const TOKEN_KEY = 'tram_nhau_auth_token';
 
@@ -105,6 +106,11 @@ export const DevModePanel: React.FC<{ onClose: () => void }> = ({ onClose }) => 
           {current?.id === 'nextgen-bar' && (
             <Suspense fallback={<p className="text-zinc-400 text-sm">Đang tải WebGPU…</p>}>
               <NextGenBarLab />
+            </Suspense>
+          )}
+          {current?.id === 'ui-lab' && (
+            <Suspense fallback={<p className="text-zinc-400 text-sm">Đang tải UI Lab…</p>}>
+              <UiLab />
             </Suspense>
           )}
         </div>

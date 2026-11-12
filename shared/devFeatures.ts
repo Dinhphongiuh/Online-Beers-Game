@@ -21,4 +21,11 @@ export const DEV_FEATURES: DevFeature[] = [
       'Quán ốc vỉa hè bên bờ kè trên WebGPU: mặt sông phản chiếu đèn, thuyền neo, cầu đổi màu, phố bên kia sông. TRAA, SSGI, GTAO, SSR, bloom (TSL) và phông nền Gaussian Splat.',
     status: 'prototype',
   },
+  {
+    id: 'ui-lab',
+    title: 'UI Lab',
+    description:
+      'Phát triển giao diện game: kit màu, chữ, nút, thẻ; thực đơn các loại bia (Tiger Bạc, Tiger Nâu, Tiger Chai, Sài Gòn, bia tươi). Ly bia và món nhậu: coming soon.',
+    status: 'prototype',
+  },
 ];
