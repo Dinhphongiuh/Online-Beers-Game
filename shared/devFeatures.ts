@@ -16,9 +16,9 @@ export const DEV_FEATURES: DevFeature[] = [
   },
   {
     id: 'nextgen-bar',
-    title: 'Quán Nhậu Next-Gen',
+    title: 'Quán Ốc Bờ Sông',
     description:
-      'Quán nhậu trên WebGPU: TRAA, SSGI, GTAO, SSR, bloom (TSL) và phông nền Gaussian Splat quét từ cảnh thật.',
+      'Quán ốc vỉa hè bên bờ kè trên WebGPU: mặt sông phản chiếu đèn, thuyền neo, cầu đổi màu, phố bên kia sông. TRAA, SSGI, GTAO, SSR, bloom (TSL) và phông nền Gaussian Splat.',
     status: 'prototype',
   },
 ];

@@ -1,5 +1,5 @@
 /**
- * Dev Mode → Quán Nhậu Next-Gen: the bar on WebGPU with TSL effects and a
+ * Dev Mode → Quán Ốc Bờ Sông: the riverside snail bar on WebGPU with TSL effects and a
  * Gaussian splat backdrop. Effects can be toggled to compare quality and FPS.
  */
 import React, { useEffect, useRef, useState } from 'react';
@@ -26,7 +26,7 @@ const EFFECT_LABELS: { id: keyof NextGenEffects; label: string; hint: string }[]
   { id: 'ssr', label: 'SSR', hint: 'Phản chiếu trên bàn inox, chai, mặt đường' },
   { id: 'bloom', label: 'Bloom', hint: 'Đèn neon, bóng đèn toả sáng' },
   { id: 'splat', label: 'Splat', hint: 'Phông nền Gaussian Splat' },
-  { id: 'floor', label: 'Nền vỉa hè', hint: 'Tắt nếu splat có sẵn mặt đất' },
+  { id: 'floor', label: 'Nền bờ kè', hint: 'Tắt nếu splat có sẵn mặt đất' },
 ];
 
 const TRANSFORM_FIELDS: { id: keyof Omit<SplatTransform, 'flip'>; label: string; min: number; max: number; step: number }[] = [

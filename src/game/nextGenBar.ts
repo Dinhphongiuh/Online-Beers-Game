@@ -1,10 +1,11 @@
 /**
- * "Quán Nhậu Next-Gen" (Dev Mode): the bar rebuilt on three.js WebGPURenderer.
+ * "Quán Ốc Bờ Sông" (Dev Mode): a riverside snail bar on three.js WebGPURenderer.
  *
  * - Background: a Gaussian splat capture (three r186+ GaussianSplat, .spz/.ply/.splat/.ksplat),
  *   rendered in its own pass and composited behind the bar.
- * - Foreground: the existing procedural bar props + VRM characters, rendered with an MRT
- *   pass and TSL post effects: SSGI (bounce light + AO) or GTAO, SSR, bloom and TRAA.
+ * - Foreground: the embankment, river and far bank (riversideScenery.ts), the procedural
+ *   bar props + VRM characters, rendered with an MRT pass and TSL post effects:
+ *   SSGI (bounce light + AO) or GTAO, SSR (river reflections), bloom and TRAA.
  *
  * The main game still runs on WebGLRenderer; this scene is a self-contained preview.
  */
@@ -13,7 +14,9 @@ import {
   colorToDirection,
   diffuseColor,
   directionToColor,
+  exp,
   float,
+  mix,
   metalness,
   mrt,
   normalView,
@@ -21,6 +24,8 @@ import {
   pass,
   roughness,
   sample,
+  uniform,
+  vec3,
   vec4,
   velocity,
 } from 'three/tsl';
@@ -40,18 +45,13 @@ import { KSPLATLoader } from 'three/addons/loaders/KSPLATLoader.js';
 import { MToonMaterialLoaderPlugin, VRMLoaderPlugin } from '@pixiv/three-vrm';
 import { MToonNodeMaterial } from '@pixiv/three-vrm/nodes';
 import {
-  createBeerCrates,
   createBeerTower,
-  createFairyLights,
   createFloorLitterAndBottles,
   createIceBucket,
-  createNeonSign,
   createPlasticStool,
-  createSidewalkTexture,
   createStainlessTable,
-  createStreetFoodCart,
-  createStreetMotorbike,
 } from './proceduralModels';
+import { createRiversideScenery } from './riversideScenery';
 import { createTableClutter } from './foodModels';
 import { createVrmCharacter, fetchVrmBuffer, prepareVrm, type VrmCharacter } from './vrmCharacter';
 
@@ -75,7 +75,8 @@ export const DEFAULT_NEXTGEN_EFFECTS: NextGenEffects = {
   gtao: true,
   ssr: true,
   bloom: true,
-  splat: true,
+  // The river scene fills the view; the splat is opt-in (it only shows in the sky).
+  splat: false,
   floor: true,
 };
 
@@ -215,23 +216,16 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   );
   bulbMesh.position.copy(bulb.position);
   scene.add(bulbMesh);
-  // Cool street-lamp rim from behind.
-  const rim = new THREE.SpotLight(0x9ab8ff, 30, 14, 0.6, 0.6, 1.5);
-  rim.position.set(-4, 5, -5);
-  rim.target.position.set(0, 0.6, 0);
-  scene.add(rim, rim.target);
-
-  const sidewalk = createSidewalkTexture();
-  sidewalk.wrapS = sidewalk.wrapT = THREE.RepeatWrapping;
-  sidewalk.repeat.set(5, 5);
-  sidewalk.anisotropy = 8;
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(5, 64),
-    new THREE.MeshStandardMaterial({ map: sidewalk, roughness: 0.55, metalness: 0.05, color: 0x9a9690 })
+  const cord = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.006, 0.006, 0.42, 6),
+    new THREE.MeshBasicMaterial({ color: 0x111113 })
   );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
+  cord.position.set(0, 2.85, 0);
+  scene.add(cord);
+
+  const scenery = createRiversideScenery();
+  const floor = scenery.ground;
+  scene.add(floor, scenery.props);
 
   const table = createStainlessTable();
   scene.add(table);
@@ -244,23 +238,7 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   bucket.position.set(-0.42, 0.98, 0.06);
   bucket.scale.setScalar(0.88);
   scene.add(bucket);
-  const crates = createBeerCrates();
-  crates.position.set(-2.4, 0, -2.2);
-  crates.rotation.y = 0.35;
-  scene.add(crates);
-  const cart = createStreetFoodCart();
-  cart.position.set(3.1, 0, -2.2);
-  cart.rotation.y = -0.4;
-  scene.add(cart);
-  const bike = createStreetMotorbike();
-  bike.position.set(-3.6, 0, 1.6);
-  bike.rotation.y = 1.2;
-  scene.add(bike);
   scene.add(createFloorLitterAndBottles());
-  scene.add(createFairyLights());
-  const sign = createNeonSign('NHẬU VỈA HÈ', 'BIA HƠI • LẨU • HẢI SẢN');
-  sign.position.set(0, 2.8, -3.6);
-  scene.add(sign);
 
   const stoolColors = [0xdc2626, 0x0284c7];
   for (let i = 0; i < SEATS; i++) {
@@ -271,7 +249,20 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     scene.add(stool);
   }
   enableShadows(scene);
-  floor.castShadow = false;
+  floor.traverse((object) => (object.castShadow = false));
+  // The bulb's cube shadow re-draws every caster six times: only props within its
+  // reach cast (the far tables, stall, lamps and trees just receive).
+  scene.updateMatrixWorld(true);
+  const casterCenter = new THREE.Vector3();
+  scenery.props.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry.computeBoundingSphere();
+    casterCenter.copy(mesh.geometry.boundingSphere!.center).applyMatrix4(mesh.matrixWorld);
+    mesh.castShadow = !(mesh as THREE.InstancedMesh).isInstancedMesh && casterCenter.distanceTo(bulb.position) < 5.5;
+  });
+  // Added after enableShadows: the river, far bank and sky neither cast nor receive.
+  scene.add(scenery.backdrop);
 
   // ---- Characters (VRM with WebGPU MToon materials) ----
   const characters: VrmCharacter[] = [];
@@ -302,16 +293,22 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   splatScene.background = new THREE.Color(0x0b0d1a); // night sky when there is no splat
   const splatRoot = new THREE.Group();
   splatScene.add(splatRoot);
+  // Moon and stars live in the backdrop pass so the river haze doesn't swallow them.
+  splatScene.add(scenery.sky);
   let splat: GaussianSplat | null = null;
   let splatBounds: THREE.Box3 | null = null;
 
   // ---- Camera ----
-  const camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.05, 200);
-  camera.position.set(3.4, 2.1, 4.2);
+  const camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.05, 400);
+  camera.position.set(4.6, 2.5, 5.4);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0.9, 0);
+  controls.target.set(0, 0.9, -0.6);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
+  controls.minDistance = 1.5;
+  controls.maxDistance = 24;
+  // Keep the orbit centre on the embankment so the camera can't wander off the map.
+  const targetLimit = new THREE.Box3(new THREE.Vector3(-14, 0.3, -5), new THREE.Vector3(14, 3, 6));
   controls.update();
 
   // ---- Post-processing (TSL) ----
@@ -354,6 +351,8 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     camera,
   });
 
+  const fogColor = uniform(vec3(0.043, 0.051, 0.1));
+  const fogDensity = uniform(0.0085);
   let effects = { ...DEFAULT_NEXTGEN_EFFECTS };
   const buildOutput = () => {
     // Lighting: SSGI adds bounce light from diffuse surfaces and its own AO.
@@ -367,8 +366,14 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
       // Reflections on the steel table, bottles and the wet-looking sidewalk.
       lit = vec4(lit.rgb.add(ssrPass.rgb.mul(ssrPass.a)), lit.a);
     }
-    // Bar over the splat backdrop (the bar pass is premultiplied with alpha 0 behind it).
-    const background = effects.splat ? splatColor.rgb : vec4(0.043, 0.051, 0.1, 1).rgb;
+    // Haze over the river (exp² by view distance) so the far bank fades into the night.
+    // Applied here because scene.fog doesn't reach the MRT output; premultiplied by alpha.
+    const viewZ = scenePass.getViewZNode();
+    const haze = float(1).sub(exp(viewZ.mul(fogDensity).pow2().negate()));
+    lit = vec4(mix(lit.rgb, fogColor.mul(lit.a), haze), lit.a);
+    // Bar over the backdrop pass: night sky, moon, stars and the optional splat
+    // (the bar pass is premultiplied with alpha 0 behind it).
+    const background = splatColor.rgb;
     let composed: THREE.Node<'vec4'> = vec4(background.mul(float(1).sub(lit.a)).add(lit.rgb), 1);
     // Threshold above 1: only real light sources (bulbs, neon) glow, not bright surfaces.
     if (effects.bloom) composed = composed.add(bloom(composed, 0.4, 0.3, 1.1));
@@ -386,6 +391,7 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     setEffects: (next) => {
       effects = { ...next };
       floor.visible = next.floor;
+      splatRoot.visible = next.splat;
       buildOutput();
     },
     loadSplat: async (source) => {
@@ -454,7 +460,9 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   renderer.setAnimationLoop(() => {
     const rawDelta = clock.getDelta();
     const delta = Math.min(rawDelta, 0.05);
+    controls.target.clamp(targetLimit.min, targetLimit.max);
     controls.update();
+    scenery.update(clock.elapsedTime, delta);
     // Every few seconds the table raises a toast.
     cheersTimer -= delta;
     const cheering = cheersTimer < 1.2;
