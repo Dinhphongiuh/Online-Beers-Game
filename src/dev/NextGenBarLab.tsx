@@ -49,6 +49,8 @@ export const NextGenBarLab: React.FC = () => {
   const [transform, setTransform] = useState<SplatTransform>(DEFAULT_SPLAT_TRANSFORM);
   const [splatInfo, setSplatInfo] = useState('');
   const [splatResolution, setSplatResolution] = useState(0.6);
+  const [playMode, setPlayMode] = useState(false);
+  const [playerStatus, setPlayerStatus] = useState('');
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -64,6 +66,7 @@ export const NextGenBarLab: React.FC = () => {
         bar = created;
         barRef.current = created;
         created.onStats = setFps;
+        created.onPlayerStatus = setPlayerStatus;
         setBackend(created.backend);
         setStatus({ kind: 'ready' });
         if (created.backend !== 'webgpu') {
@@ -100,6 +103,10 @@ export const NextGenBarLab: React.FC = () => {
     barRef.current?.setSplatResolution(splatResolution);
   }, [splatResolution, status.kind]);
 
+  useEffect(() => {
+    barRef.current?.setPlayMode(playMode);
+  }, [playMode, status.kind]);
+
   const loadFile = async (file: File | undefined) => {
     if (!file || !barRef.current) return;
     setSplatInfo(`Đang tải ${file.name}…`);
@@ -132,6 +139,11 @@ export const NextGenBarLab: React.FC = () => {
         <div className="absolute top-2 left-2 rounded-lg bg-black/60 px-2 py-1 text-[11px] font-bold text-emerald-300 pointer-events-none">
           {status.kind === 'ready' ? `${backend.toUpperCase()} • ${fps} FPS` : status.kind === 'error' ? '' : 'Đang khởi động WebGPU…'}
         </div>
+        {playMode && playerStatus && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl bg-black/70 px-3 py-1.5 text-xs font-black text-amber-200 pointer-events-none">
+            {playerStatus}
+          </div>
+        )}
         {status.kind === 'error' && (
           <div className="absolute inset-0 flex items-center justify-center p-4">
             <p className="max-w-sm text-center text-sm font-bold text-rose-300">❌ {status.message}</p>
@@ -140,6 +152,24 @@ export const NextGenBarLab: React.FC = () => {
       </div>
 
       <div className="md:w-72 shrink-0 space-y-3 text-sm overflow-y-auto">
+        <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-2.5 space-y-1.5">
+          <button
+            data-testid="nextgen-play-toggle"
+            className={`w-full rounded-lg py-1.5 text-xs font-black border transition ${
+              playMode ? 'bg-emerald-400 text-zinc-950 border-emerald-200' : 'bg-zinc-900 text-emerald-200 border-emerald-700'
+            }`}
+            onClick={(e) => {
+              setPlayMode((current) => !current);
+              // Keep focus off the button so Space/Enter don't re-toggle while walking.
+              e.currentTarget.blur();
+            }}
+          >
+            {playMode ? '🎮 Đang điều khiển nhân vật (bấm để tắt)' : '🎮 Điều khiển nhân vật'}
+          </button>
+          <p className="text-[10px] leading-snug text-emerald-100/70">
+            WASD / mũi tên: đi • Shift: chạy • E: ngồi xuống / đứng dậy • Kéo chuột: xoay camera • Cuộn: zoom
+          </p>
+        </div>
         <div>
           <span className="text-[11px] font-black text-amber-300 uppercase tracking-wider">Hiệu ứng WebGPU (TSL)</span>
           <div className="mt-1 flex flex-wrap gap-1.5">

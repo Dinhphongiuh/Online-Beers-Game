@@ -16,10 +16,13 @@ import {
   createStandingIndustrialFan,
   createStreetMotorbike,
 } from './proceduralModels';
+import type { Collider, PlayerBounds, Seat } from './playerController';
 
 export const RIVER_EDGE_Z = -5.6;
 export const ROAD_EDGE_Z = 6.6;
 const WATER_Y = -1.35;
+/** Where the road ends and the far sidewalk (shophouse side) begins. */
+const FAR_WALK_Z = ROAD_EDGE_Z + 0.22 + 7.4;
 const HALF_WIDTH = 60;
 
 export interface RiversideScenery {
@@ -31,6 +34,11 @@ export interface RiversideScenery {
   backdrop: THREE.Group;
   /** Moon and stars, for the background pass (unaffected by the river haze). */
   sky: THREE.Group;
+  /** Obstacles for the walkable character (the main table is added by the caller). */
+  colliders: Collider[];
+  /** Free stools at the neighbouring tables. */
+  seats: Seat[];
+  bounds: PlayerBounds;
   update: (time: number, delta: number) => void;
 }
 
@@ -610,6 +618,9 @@ export function createRiversideScenery(): RiversideScenery {
   const backdrop = new THREE.Group();
   backdrop.name = 'RiversideBackdrop';
   const updates: ((time: number, delta: number) => void)[] = [];
+  const colliders: Collider[] = [];
+  const seats: Seat[] = [];
+  const circle = (x: number, z: number, r: number) => colliders.push({ kind: 'circle', x, z, r });
 
   props.add(createEmbankment());
 
@@ -618,6 +629,7 @@ export function createRiversideScenery(): RiversideScenery {
     const lamp = createStreetLamp();
     lamp.position.set(x, 0, RIVER_EDGE_Z + 0.35);
     props.add(lamp);
+    circle(x, RIVER_EDGE_Z + 0.35, 0.12);
   });
 
   // Neighbouring tables spread along the embankment.
@@ -634,12 +646,33 @@ export function createRiversideScenery(): RiversideScenery {
     neighbour.position.set(x, 0, z);
     neighbour.rotation.y = rotation;
     props.add(neighbour);
+    // Table top radius 1.6 × 0.75. Its stools come at 1.15 m, under the rim: pull them
+    // out to 1.5 m so someone can actually sit there (children 2..4 are the stools).
+    circle(x, z, 1.1);
+    neighbour.children.slice(2, 5).forEach((stool) => {
+      stool.position.setLength(1.5);
+      stool.rotation.y = Math.atan2(stool.position.x, stool.position.z);
+      const world = stool.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
+      seats.push({ x: x + world.x, z: z + world.z, facing: Math.atan2(-world.x, -world.z) });
+    });
   });
 
   const stall = createSnailStall();
   stall.group.position.set(8.2, 0, 0.6);
   stall.group.rotation.y = -Math.PI / 2 + 0.3;
   props.add(stall.group);
+  {
+    // The stall's footprint spans local z -1.35..1.5 (back panel to display table).
+    const center = new THREE.Vector3(0, 0, 0.075).applyAxisAngle(new THREE.Vector3(0, 1, 0), stall.group.rotation.y);
+    colliders.push({
+      kind: 'box',
+      x: stall.group.position.x + center.x,
+      z: stall.group.position.z + center.z,
+      hw: 2.75, // includes the stacked ice boxes at the side
+      hd: 1.45,
+      yaw: stall.group.rotation.y,
+    });
+  }
   updates.push(stall.update);
 
   const crates = createBeerCrates();
@@ -651,11 +684,14 @@ export function createRiversideScenery(): RiversideScenery {
   crates2.rotation.y = -0.2;
   crates2.scale.y = 0.68;
   props.add(crates2);
+  circle(10.8, -2.8, 0.45);
+  circle(11.5, -2.1, 0.45);
 
   const fan = createStandingIndustrialFan();
   fan.group.position.set(-2.6, 0, -4.4);
   fan.group.rotation.y = 0.5; // blowing toward the main table
   props.add(fan.group);
+  circle(-2.6, -4.4, 0.3);
   updates.push((_, delta) => {
     fan.bladesGroup.rotation.z += delta * 14;
   });
@@ -670,6 +706,7 @@ export function createRiversideScenery(): RiversideScenery {
     const tree = createTree(seed);
     tree.position.set(x, 0, z);
     props.add(tree);
+    circle(x, z, 0.6);
   });
 
   // Scooters parked nose-in along the curb.
@@ -685,12 +722,14 @@ export function createRiversideScenery(): RiversideScenery {
     bike.position.set(x, 0, ROAD_EDGE_Z - 0.75);
     bike.rotation.y = Math.PI / 2 + (i % 2 ? 0.08 : -0.06);
     props.add(bike);
+    colliders.push({ kind: 'box', x, z: ROAD_EDGE_Z - 0.75, hw: 0.55, hd: 0.2, yaw: bike.rotation.y });
   });
 
   // Festoon lights: along the railing, and two strings crossing over the dining area.
   const festoonPole = (x: number, z: number) => {
     const pole = box(0.05, 3.1, 0.05, std(0x27272a, 0.5, 0.6), x, 1.55, z);
     props.add(pole);
+    circle(x, z, 0.08);
   };
   [-7, 7].forEach((x) => festoonPole(x, RIVER_EDGE_Z + 0.2));
   [-5, 5].forEach((x) => festoonPole(x, ROAD_EDGE_Z - 0.3));
@@ -794,6 +833,15 @@ export function createRiversideScenery(): RiversideScenery {
     props,
     backdrop,
     sky: createSky(),
+    colliders,
+    seats,
+    bounds: {
+      minX: -HALF_WIDTH + 2,
+      maxX: HALF_WIDTH - 2,
+      minZ: RIVER_EDGE_Z + 0.35, // the railing
+      maxZ: FAR_WALK_Z + 2.0, // up to the shophouse fronts
+      groundY: (_x, z) => (z > ROAD_EDGE_Z + 0.22 && z < FAR_WALK_Z ? -0.16 : 0),
+    },
     update: (time, delta) => updates.forEach((update) => update(time, delta)),
   };
 }

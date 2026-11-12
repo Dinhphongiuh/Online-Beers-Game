@@ -52,6 +52,7 @@ import {
   createStainlessTable,
 } from './proceduralModels';
 import { createRiversideScenery } from './riversideScenery';
+import { createPlayerController, type Collider, type PlayerController, type Seat } from './playerController';
 import { createTableClutter } from './foodModels';
 import { createVrmCharacter, fetchVrmBuffer, prepareVrm, type VrmCharacter } from './vrmCharacter';
 
@@ -113,6 +114,13 @@ export interface NextGenBar {
   setSplatResolution: (scale: number) => void;
   /** A transform that puts the splat behind the bar with its floor at y = 0. */
   fitSplat: (current: SplatTransform) => SplatTransform | null;
+  /**
+   * Walk the seat-0 character around the map (WASD / arrows, Shift runs, E sits);
+   * the camera follows it. Off: the character goes back to its stool.
+   */
+  setPlayMode: (enabled: boolean) => void;
+  /** Control hints while playing ("Nhấn E để ngồi" …). */
+  onPlayerStatus?: (status: string) => void;
   onStats?: (fps: number) => void;
   dispose: () => void;
 }
@@ -266,6 +274,21 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
 
   // ---- Characters (VRM with WebGPU MToon materials) ----
   const characters: VrmCharacter[] = [];
+  // Walkable character: stools at the main table (0..5), then the neighbouring tables.
+  const PLAYER_SEAT = 0;
+  const seats: Seat[] = [
+    ...Array.from({ length: SEATS }, (_, i) => {
+      const angle = seatAngle(i);
+      return { x: Math.cos(angle) * TABLE_RADIUS, z: Math.sin(angle) * TABLE_RADIUS, facing: -angle - Math.PI / 2 };
+    }),
+    ...scenery.seats,
+  ];
+  const occupiedSeats = new Set([2]);
+  // Main table top is 1.6 m; a little less so the stools stay reachable.
+  const colliders: Collider[] = [{ kind: 'circle', x: 0, z: 0, r: 1.5 }, ...scenery.colliders];
+  let player: PlayerController | null = null;
+  let playerCharacter: VrmCharacter | null = null;
+  let playRequested = false;
   const vrmLoader = createWebGPUVrmLoader();
   const seatCharacter = async (url: string, seat: number, alcohol: number) => {
     try {
@@ -281,6 +304,19 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
       enableShadows(character.root);
       scene.add(character.root);
       characters.push(character);
+      if (seat === PLAYER_SEAT) {
+        playerCharacter = character;
+        player = createPlayerController({
+          character,
+          colliders,
+          seats,
+          occupied: occupiedSeats,
+          homeSeat: PLAYER_SEAT,
+          bounds: scenery.bounds,
+        });
+        player.onStatus = (status) => api.onPlayerStatus?.(status);
+        player.setEnabled(playRequested);
+      }
     } catch (error) {
       console.warn('[next-gen bar] character failed to load', url, error);
     }
@@ -444,7 +480,18 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
         z: +(targetZ - centerZ * scale).toFixed(2),
       };
     },
+    setPlayMode: (enabled) => {
+      playRequested = enabled;
+      player?.setEnabled(enabled);
+      if (!enabled) {
+        // Back to the table view.
+        cameraOffset.copy(camera.position).sub(controls.target);
+        controls.target.set(0, 0.9, -0.6);
+        camera.position.copy(controls.target).add(cameraOffset);
+      }
+    },
     dispose: () => {
+      player?.dispose();
       renderer.setAnimationLoop(null);
       observer.disconnect();
       controls.dispose();
@@ -456,11 +503,30 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   };
   api.setSplatTransform(DEFAULT_SPLAT_TRANSFORM);
 
+  const cameraOffset = new THREE.Vector3();
+  const cameraForward = new THREE.Vector3();
+  const followTarget = new THREE.Vector3();
+  const followShift = new THREE.Vector3();
   let cheersTimer = 4;
   renderer.setAnimationLoop(() => {
     const rawDelta = clock.getDelta();
     const delta = Math.min(rawDelta, 0.05);
-    controls.target.clamp(targetLimit.min, targetLimit.max);
+    if (player?.enabled) {
+      camera.getWorldDirection(cameraForward);
+      player.update(delta, cameraForward);
+      // Third-person follow: slide the orbit (target and camera together) after the
+      // character, so mouse-drag orbiting and zoom keep working while walking.
+      if (playerCharacter) {
+        const { root } = playerCharacter;
+        followTarget.set(root.position.x, root.position.y + 1.2, root.position.z);
+        followShift.copy(controls.target);
+        controls.target.lerp(followTarget, 1 - Math.exp(-8 * delta));
+        followShift.subVectors(controls.target, followShift);
+        camera.position.add(followShift);
+      }
+    } else {
+      controls.target.clamp(targetLimit.min, targetLimit.max);
+    }
     controls.update();
     scenery.update(clock.elapsedTime, delta);
     // Every few seconds the table raises a toast.
@@ -468,7 +534,8 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     const cheering = cheersTimer < 1.2;
     if (cheersTimer < 0) cheersTimer = 6 + Math.random() * 4;
     characters.forEach((character) => {
-      character.state.cheers = cheering;
+      // Only people sitting at a table join the toast.
+      character.state.cheers = cheering && character.state.pose === 'seated';
       character.update(delta);
     });
     bulb.intensity = 14 + Math.sin(clock.elapsedTime * 13) * 0.6; // filament flicker
