@@ -22,6 +22,13 @@ export const DEV_FEATURES: DevFeature[] = [
     status: 'prototype',
   },
   {
+    id: 'ride-lab',
+    title: 'Ride Lab — Chạy xe về quán',
+    description:
+      'Phát triển cơ chế lái xe máy: vật lý nghiêng cua, hộp số, đạp nổ, chân chống, say xỉn; HUD đồng hồ tốc độ, minimap; lộ trình hẻm → đường lớn → bờ kè với ổ gà, gờ giảm tốc, xe cộ, chốt CSGT.',
+    status: 'prototype',
+  },
+  {
     id: 'ui-lab',
     title: 'UI Lab',
     description:
