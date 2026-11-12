@@ -10,6 +10,7 @@
 import * as THREE from 'three/webgpu';
 import {
   createBeerCrates,
+  createFloorLitterAndBottles,
   createNeighborTableGroup,
   createNeonSign,
   createSidewalkTexture,
@@ -17,6 +18,21 @@ import {
   createStreetMotorbike,
 } from './proceduralModels';
 import type { Collider, PlayerBounds, Seat } from './playerController';
+import {
+  createBanner,
+  createDrinksFridge,
+  createFootballTv,
+  createHangingBulb,
+  createSeafoodTanks,
+  createShellBucket,
+  createShrine,
+  createStoolStack,
+  createTableSpread,
+  createTrashBin,
+  createUmbrella,
+  mergeStatic,
+} from './quanOcProps';
+import { HOUSE_DEPTH, HOUSE_WIDTH, createQuanOcHouse, type QuanOcHouse } from './quanOcInterior';
 
 export const RIVER_EDGE_Z = -5.6;
 export const ROAD_EDGE_Z = 6.6;
@@ -39,7 +55,10 @@ export interface RiversideScenery {
   /** Free stools at the neighbouring tables. */
   seats: Seat[];
   bounds: PlayerBounds;
-  update: (time: number, delta: number) => void;
+  /** The walk-in shophouse: its interior box and where its staff stand. */
+  house: Pick<QuanOcHouse, 'interior' | 'tight' | 'staff' | 'route'>;
+  /** `focus` = the walking player (opens doors). */
+  update: (time: number, delta: number, focus?: THREE.Vector3) => void;
 }
 
 // ---------- small helpers ----------
@@ -556,7 +575,8 @@ function createBuildingRow(options: {
   const wallColors = [0x2a2a30, 0x34302c, 0x2b3036, 0x3a2f2f, 0x2f3329];
   let x = options.fromX;
   while (x < options.toX) {
-    const width = options.shopFront ? 3.6 + random() * 1.6 : 6 + random() * 9;
+    // Shophouses fill the row exactly (the last one is trimmed to toX).
+    const width = options.shopFront ? Math.min(3.6 + random() * 1.6, options.toX - x) : 6 + random() * 9;
     const height = options.minHeight + random() * (options.maxHeight - options.minHeight);
     const texture = textures[Math.floor(random() * textures.length)];
     const facade = new THREE.MeshStandardMaterial({
@@ -617,7 +637,7 @@ export function createRiversideScenery(): RiversideScenery {
   props.name = 'RiversideProps';
   const backdrop = new THREE.Group();
   backdrop.name = 'RiversideBackdrop';
-  const updates: ((time: number, delta: number) => void)[] = [];
+  const updates: ((time: number, delta: number, focus?: THREE.Vector3) => void)[] = [];
   const colliders: Collider[] = [];
   const seats: Seat[] = [];
   const circle = (x: number, z: number, r: number) => colliders.push({ kind: 'circle', x, z, r });
@@ -633,19 +653,43 @@ export function createRiversideScenery(): RiversideScenery {
   });
 
   // Neighbouring tables spread along the embankment.
-  (
-    [
-      [-4.6, -2.6, 0.4],
-      [-4.4, 2.6, 1.3],
-      [3.4, -3.4, 2.2],
-      [-9.2, -1.2, 0.9],
-      [-10.4, 3.2, 2.6],
-    ] as const
-  ).forEach(([x, z, rotation]) => {
+  // Each one is dressed (dishes, drinks, shells, bucket) and then merged into a few meshes.
+  const NEIGHBOUR_TABLES: {
+    x: number;
+    z: number;
+    rotation: number;
+    dishes: string[];
+    umbrella?: [number, number];
+    iceBucket?: boolean;
+  }[] = [
+    { x: -4.6, z: -2.6, rotation: 0.4, dishes: ['oc_huong', 'peanut'] },
+    { x: -4.4, z: 2.6, rotation: 1.3, dishes: ['oc_huong', 'chicken_feet', 'xoai_non'], umbrella: [0xdc2626, 0xca8a04] },
+    { x: 3.4, z: -3.4, rotation: 2.2, dishes: ['ca_vien', 'oc_huong'], iceBucket: true },
+    { x: -9.2, z: -1.2, rotation: 0.9, dishes: ['peanut', 'oc_huong', 'ca_vien'], umbrella: [0x15803d, 0xa16207] },
+    { x: -10.4, z: 3.2, rotation: 2.6, dishes: ['chicken_feet', 'oc_huong'], iceBucket: true },
+  ];
+  const NEIGHBOUR_TOP = 0.98 * 0.9; // createNeighborTableGroup scales the table by 0.9 in Y
+  NEIGHBOUR_TABLES.forEach(({ x, z, rotation, dishes, umbrella, iceBucket }, index) => {
     const neighbour = createNeighborTableGroup();
     neighbour.position.set(x, 0, z);
     neighbour.rotation.y = rotation;
-    props.add(neighbour);
+    if (umbrella) {
+      // The umbrella pole goes through the middle where the beer tower stood.
+      neighbour.children[1].removeFromParent();
+      neighbour.add(createUmbrella(umbrella[0], umbrella[1]));
+    } else {
+      neighbour.add(createHangingBulb(3.0, 2.3));
+    }
+    neighbour.add(
+      createTableSpread({ seed: 100 + index * 17, top: NEIGHBOUR_TOP, radius: 1.15, dishes, clearCenter: 0.26, iceBucket })
+    );
+    const bucket = createShellBucket(index % 2 ? 0x2563eb : 0xdc2626, index);
+    bucket.position.set(Math.cos(Math.PI / 3) * 1.3, 0, Math.sin(Math.PI / 3) * 1.3);
+    neighbour.add(bucket);
+    const litter = createFloorLitterAndBottles();
+    litter.scale.setScalar(0.8);
+    litter.rotation.y = index;
+    neighbour.add(litter);
     // Table top radius 1.6 × 0.75. Its stools come at 1.15 m, under the rim: pull them
     // out to 1.5 m so someone can actually sit there (children 2..4 are the stools).
     circle(x, z, 1.1);
@@ -653,14 +697,56 @@ export function createRiversideScenery(): RiversideScenery {
       stool.position.setLength(1.5);
       stool.rotation.y = Math.atan2(stool.position.x, stool.position.z);
       const world = stool.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
-      seats.push({ x: x + world.x, z: z + world.z, facing: Math.atan2(-world.x, -world.z) });
+      seats.push({ x: x + world.x, z: z + world.z, facing: Math.atan2(-world.x, -world.z), table: 1 + index });
     });
+    props.add(mergeStatic(neighbour));
   });
 
   const stall = createSnailStall();
   stall.group.position.set(8.2, 0, 0.6);
   stall.group.rotation.y = -Math.PI / 2 + 0.3;
-  props.add(stall.group);
+  props.add(mergeStatic(stall.group));
+  /** A point in the stall's frame (local +z is its customer-facing front). */
+  const stallSpot = (lx: number, lz: number) =>
+    new THREE.Vector3(lx, 0, lz).applyAxisAngle(new THREE.Vector3(0, 1, 0), stall.group.rotation.y).add(stall.group.position);
+  const place = (object: THREE.Object3D, at: THREE.Vector3, yaw: number) => {
+    object.position.copy(at);
+    object.rotation.y = yaw;
+    return object;
+  };
+
+  // Drinks fridge beside the ice boxes, seafood tanks on the road side of the stall.
+  const fridgeAt = stallSpot(-3.35, -0.9);
+  props.add(mergeStatic(place(createDrinksFridge(), fridgeAt, stall.group.rotation.y)));
+  colliders.push({ kind: 'box', x: fridgeAt.x, z: fridgeAt.z, hw: 0.42, hd: 0.38, yaw: stall.group.rotation.y });
+  const tanks = createSeafoodTanks();
+  const tanksAt = stallSpot(3.25, 0.2);
+  props.add(place(tanks.group, tanksAt, stall.group.rotation.y));
+  updates.push(tanks.update);
+  colliders.push({ kind: 'box', x: tanksAt.x, z: tanksAt.z, hw: 0.8, hd: 0.34, yaw: stall.group.rotation.y });
+  // Thần Tài shrine on the floor at the corner of the stall, facing the customers.
+  props.add(mergeStatic(place(createShrine(), stallSpot(-1.95, 0.1), stall.group.rotation.y)));
+
+  // Football on TV, turned toward the tables.
+  const tv = createFootballTv();
+  props.add(place(tv.group, new THREE.Vector3(5.6, 0, 3.9), Math.atan2(-8.6, -3.9)));
+  updates.push(tv.update);
+  circle(5.6, 3.9, 0.4);
+
+  // Spare stools stacked up, a bin by the curb.
+  (
+    [
+      [6.3, -2.3, 0xdc2626, 7],
+      [5.8, -1.7, 0x0284c7, 6],
+      [-13.2, -4.2, 0x0284c7, 5],
+      [-12.6, -4.5, 0xdc2626, 4],
+    ] as const
+  ).forEach(([x, z, color, count], i) => {
+    props.add(mergeStatic(place(createStoolStack(color, count), new THREE.Vector3(x, 0, z), i * 0.7)));
+    circle(x, z, 0.32);
+  });
+  props.add(mergeStatic(place(createTrashBin(), new THREE.Vector3(6.4, 0, 5.5), 0)));
+  circle(6.4, 5.5, 0.3);
   {
     // The stall's footprint spans local z -1.35..1.5 (back panel to display table).
     const center = new THREE.Vector3(0, 0, 0.075).applyAxisAngle(new THREE.Vector3(0, 1, 0), stall.group.rotation.y);
@@ -733,6 +819,10 @@ export function createRiversideScenery(): RiversideScenery {
   };
   [-7, 7].forEach((x) => festoonPole(x, RIVER_EDGE_Z + 0.2));
   [-5, 5].forEach((x) => festoonPole(x, ROAD_EDGE_Z - 0.3));
+  // Banner between the road-side poles, reading from the street and the tables.
+  const banner = createBanner('QUÁN ỐC BỜ SÔNG', 'Ốc tươi mỗi ngày • Bia lạnh • Mở cửa 16h - 2h sáng', 8);
+  banner.position.set(0, 2.5, ROAD_EDGE_Z - 0.3);
+  props.add(banner);
   props.add(
     festoon(
       [-21, -14, -7, 0, 7, 14, 21].map((x) => new THREE.Vector3(x, x === 0 || Math.abs(x) === 14 ? 3.2 : 3.05, RIVER_EDGE_Z + 0.2)),
@@ -813,35 +903,48 @@ export function createRiversideScenery(): RiversideScenery {
     createBuildingRow({ seed: 9, z: farZ - 22, facing: 1, fromX: -200, toX: 200, minHeight: 25, maxHeight: 80, depth: 12, shopFront: false })
   );
 
-  // Shophouses across the road ("nhà phố"), facing the river.
-  backdrop.add(
-    createBuildingRow({
-      seed: 21,
-      z: ROAD_EDGE_Z + 0.22 + 7.4 + 2.4,
-      facing: -1,
-      fromX: -HALF_WIDTH,
-      toX: HALF_WIDTH,
-      minHeight: 8,
-      maxHeight: 15,
-      depth: 8,
-      shopFront: true,
-    })
-  );
+  // Shophouses across the road ("nhà phố"), facing the river, with the quán's own
+  // walk-in house in the middle of the row.
+  const houseFront = FAR_WALK_Z + 2.4;
+  const houseHalf = HOUSE_WIDTH / 2 + 0.1;
+  [
+    [-HALF_WIDTH, -houseHalf, 21],
+    [houseHalf, HALF_WIDTH, 22],
+  ].forEach(([fromX, toX, seed]) => {
+    backdrop.add(
+      createBuildingRow({ seed, z: houseFront, facing: -1, fromX, toX, minHeight: 8, maxHeight: 15, depth: 8, shopFront: true })
+    );
+    // Solid block behind the neighbours' fronts (also the house's side walls from outside).
+    colliders.push({
+      kind: 'box',
+      x: (fromX + toX) / 2,
+      z: houseFront + HOUSE_DEPTH / 2 + 1,
+      hw: (toX - fromX) / 2 + (fromX < 0 ? 0.3 : 0.3),
+      hd: HOUSE_DEPTH / 2 + 1,
+      yaw: 0,
+    });
+  });
+  const house = createQuanOcHouse({ originX: 0, front: houseFront });
+  props.add(house.group);
+  colliders.push(...house.colliders);
+  seats.push(...house.seats);
+  updates.push(house.update);
 
   return {
     ground,
     props,
     backdrop,
     sky: createSky(),
+    house: { interior: house.interior, tight: house.tight, staff: house.staff, route: house.route },
     colliders,
     seats,
     bounds: {
       minX: -HALF_WIDTH + 2,
       maxX: HALF_WIDTH - 2,
       minZ: RIVER_EDGE_Z + 0.35, // the railing
-      maxZ: FAR_WALK_Z + 2.0, // up to the shophouse fronts
+      maxZ: houseFront + HOUSE_DEPTH - 0.3, // into the house; the row of buildings is a collider
       groundY: (_x, z) => (z > ROAD_EDGE_Z + 0.22 && z < FAR_WALK_Z ? -0.16 : 0),
     },
-    update: (time, delta) => updates.forEach((update) => update(time, delta)),
+    update: (time, delta, focus) => updates.forEach((update) => update(time, delta, focus)),
   };
 }

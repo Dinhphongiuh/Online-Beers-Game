@@ -53,8 +53,10 @@ import {
 } from './proceduralModels';
 import { createRiversideScenery } from './riversideScenery';
 import { createPlayerController, type Collider, type PlayerController, type Seat } from './playerController';
-import { createTableClutter } from './foodModels';
-import { createVrmCharacter, fetchVrmBuffer, prepareVrm, type VrmCharacter } from './vrmCharacter';
+import { createFoodPlatter, createTableClutter } from './foodModels';
+import { createShellBucket, mergeStatic } from './quanOcProps';
+import type { VrmOutfit } from './vrmOutfit';
+import { VRM_MOVE_SPEED, createVrmCharacter, fetchVrmBuffer, prepareVrm, type VrmCharacter } from './vrmCharacter';
 
 export const SAMPLE_SPLAT_URL = '/assets/splats/sample-street.spz';
 
@@ -237,7 +239,43 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
 
   const table = createStainlessTable();
   scene.add(table);
-  scene.add(createTableClutter());
+  scene.add(mergeStatic(createTableClutter()));
+  const bucketColliders: Collider[] = [];
+  // The six dishes of the main game, at the same spots on the table (threeScene DISH_POSITIONS).
+  const animatedDishes: THREE.Object3D[] = [];
+  (
+    [
+      ['hotpot', -12, 0.86],
+      ['peanut', 35, 0.92],
+      ['xoai_non', 80, 0.92],
+      ['oc_huong', 125, 0.92],
+      ['ca_vien', -100, 0.92],
+      ['chicken_feet', -56, 0.92],
+    ] as const
+  ).forEach(([type, degrees, radius]) => {
+    const dish = createFoodPlatter(type);
+    const angle = THREE.MathUtils.degToRad(degrees);
+    dish.position.set(Math.cos(angle) * radius, 0.98, Math.sin(angle) * radius);
+    if (dish.userData.update) {
+      // Hotpot: bubbling broth. Its steam sprites don't blend in the MRT pass (they
+      // show as grey discs), so they stay hidden here.
+      dish.traverse((object) => {
+        if ((object as THREE.Sprite).isSprite) object.visible = false;
+      });
+      animatedDishes.push(dish);
+      scene.add(dish);
+    } else {
+      scene.add(mergeStatic(dish));
+    }
+  });
+  // Shell buckets between the stools.
+  [0.5, 2.5, 4.5].forEach((slot, i) => {
+    const bucket = createShellBucket(i % 2 ? 0xdc2626 : 0x2563eb, 40 + i);
+    const angle = seatAngle(slot);
+    bucket.position.set(Math.cos(angle) * 1.9, 0, Math.sin(angle) * 1.9);
+    scene.add(mergeStatic(bucket));
+    bucketColliders.push({ kind: 'circle', x: bucket.position.x, z: bucket.position.z, r: 0.16 });
+  });
   const tower = createBeerTower(0.9);
   tower.position.set(-0.6, 0.98, -0.3);
   tower.scale.setScalar(0.85);
@@ -283,27 +321,44 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     }),
     ...scenery.seats,
   ];
-  const occupiedSeats = new Set([2]);
+  // Seats taken by the other customers (see PATRONS below).
+  const occupiedSeats = new Set<number>();
+  /** Which table a seat belongs to: 0 = main table, then one per neighbouring table. */
+  const tableOf = (seat: number) => seats[seat].table ?? 0;
+  /** Index of the k-th stool of a table (scenery seats carry their table id). */
+  const seatAt = (table: number, k: number) => seats.flatMap((seat, i) => (seat.table === table ? [i] : []))[k];
+  const house = scenery.house;
+  const houseFront = house.interior.min.z + 0.2;
+  const characterTable = new Map<VrmCharacter, number>();
   // Main table top is 1.6 m; a little less so the stools stay reachable.
-  const colliders: Collider[] = [{ kind: 'circle', x: 0, z: 0, r: 1.5 }, ...scenery.colliders];
+  const colliders: Collider[] = [{ kind: 'circle', x: 0, z: 0, r: 1.5 }, ...bucketColliders, ...scenery.colliders];
   let player: PlayerController | null = null;
   let playerCharacter: VrmCharacter | null = null;
   let playRequested = false;
   const vrmLoader = createWebGPUVrmLoader();
-  const seatCharacter = async (url: string, seat: number, alcohol: number) => {
+  const seatCharacter = async (
+    url: string,
+    seat: number,
+    alcohol: number,
+    look: { height?: number; outfit?: VrmOutfit; mood?: VrmCharacter['state']['mood'] } = {}
+  ) => {
+    if (seat !== PLAYER_SEAT) occupiedSeats.add(seat);
     try {
       const gltf = await vrmLoader.parseAsync(await fetchVrmBuffer(url), '');
       const character = createVrmCharacter(
         prepareVrm(gltf as unknown as Parameters<typeof prepareVrm>[0]),
-        { pose: 'seated', alcohol, mood: 'neutral', cheers: false },
-        { targetHeight: seat === 0 ? 1.62 : 1.52 }
+        { pose: 'seated', alcohol, mood: look.mood ?? 'neutral', cheers: false },
+        { targetHeight: look.height ?? (seat === 0 ? 1.62 : 1.52), outfit: look.outfit }
       );
-      const angle = seatAngle(seat);
-      character.root.position.set(Math.cos(angle) * TABLE_RADIUS, 0, Math.sin(angle) * TABLE_RADIUS);
-      character.root.rotation.y = -angle - Math.PI / 2;
+      character.root.position.set(seats[seat].x, 0, seats[seat].z);
+      character.root.rotation.y = seats[seat].facing;
       enableShadows(character.root);
+      // VRoid models are dozens of primitives: only the main table (inside the bulb's
+      // shadow range) casts into the cube shadow map; everyone else just receives.
+      if (seat >= SEATS) character.root.traverse((object) => (object.castShadow = false));
       scene.add(character.root);
       characters.push(character);
+      characterTable.set(character, tableOf(seat));
       if (seat === PLAYER_SEAT) {
         playerCharacter = character;
         player = createPlayerController({
@@ -321,8 +376,128 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
       console.warn('[next-gen bar] character failed to load', url, error);
     }
   };
-  void seatCharacter('/assets/characters/vrm/male_fumiriya.vrm', 0, 35);
-  void seatCharacter('/assets/characters/vrm/female_pixiv.vrm', 2, 55);
+  const MALE = '/assets/characters/vrm/male_fumiriya.vrm';
+  const FEMALE = '/assets/characters/vrm/female_pixiv.vrm';
+  const outfit = (colors: VrmOutfit['colors'], accessories: VrmOutfit['accessories'] = []): VrmOutfit => ({
+    colors,
+    skinTone: null,
+    accessories,
+  });
+  void seatCharacter(MALE, PLAYER_SEAT, 35);
+  void seatCharacter(FEMALE, 2, 55);
+  // Other customers, recoloured so the two base models read as different people.
+  // Seats: 0..5 main table, then three per neighbouring table in NEIGHBOUR_TABLES order.
+  const PATRONS: [string, number, number, Parameters<typeof seatCharacter>[3]][] = [
+    [MALE, 4, 70, { height: 1.58, outfit: outfit({ top: '#f97316', bottom: '#1f2937' }, ['cap']), mood: 'happy' }],
+    [MALE, 6, 85, { height: 1.66, outfit: outfit({ top: '#1d4ed8', hair: '#111111' }, ['scarf']), mood: 'happy' }],
+    [FEMALE, 7, 30, { height: 1.5, outfit: outfit({ top: '#db2777', hair: '#3f2a1d' }, ['headband']), mood: 'relaxed' }],
+    [MALE, 9, 50, { height: 1.6, outfit: outfit({ top: '#16a34a', hair: '#4b2e1a' }, ['sunglasses']) }],
+    [FEMALE, 12, 65, { height: 1.54, outfit: outfit({ top: '#e5e7eb', hair: '#1c1917' }), mood: 'happy' }],
+    [MALE, 13, 40, { height: 1.62, outfit: outfit({ top: '#7c3aed', bottom: '#334155' }, ['cap']) }],
+    [MALE, 16, 95, { height: 1.64, outfit: outfit({ top: '#dc2626', hair: '#111111' }), mood: 'sad' }],
+    [FEMALE, 19, 45, { height: 1.52, outfit: outfit({ top: '#0ea5e9', hair: '#5b3a24' }, ['headband']), mood: 'relaxed' }],
+  ];
+  // Inside the house (indoor tables are 100..103).
+  PATRONS.push(
+    [MALE, seatAt(100, 0), 60, { height: 1.6, outfit: outfit({ top: '#f59e0b', hair: '#111111' }, ['cap']), mood: 'happy' }],
+    [FEMALE, seatAt(100, 2), 35, { height: 1.52, outfit: outfit({ top: '#a855f7', hair: '#3f2a1d' }), mood: 'relaxed' }],
+    [MALE, seatAt(103, 1), 90, { height: 1.64, outfit: outfit({ top: '#0f766e', bottom: '#1f2937' }, ['scarf']), mood: 'happy' }],
+    [MALE, seatAt(102, 3), 25, { height: 1.58, outfit: outfit({ top: '#e11d48', hair: '#4b2e1a' }, ['sunglasses']) }]
+  );
+  PATRONS.forEach(([, seat]) => occupiedSeats.add(seat));
+  // The waitress loops from the stall round the tables, stopping to serve.
+  // Waypoints thread the gaps between tables; `pause` is seconds spent at each.
+  const WAITRESS_ROUTE: { x: number; z: number; pause: number }[] = [
+    { x: 6.2, z: 0.8, pause: 3 }, // at the stall
+    { x: 3.6, z: -1.6, pause: 2 },
+    { x: 2.6, z: 1.2, pause: 0 },
+    { x: 1.2, z: 3.0, pause: 1.5 },
+    { x: -2.4, z: 2.6, pause: 0 },
+    { x: -2.6, z: -0.4, pause: 2 },
+    { x: -6.8, z: 0.6, pause: 2 },
+    { x: -6.6, z: 4.6, pause: 0 },
+    { x: -1.0, z: 4.6, pause: 0 },
+    // Across the road into the house, round its tables and back out.
+    { x: 0, z: houseFront - 2.5, pause: 0 },
+    ...house.route,
+    { x: 0, z: houseFront - 2.5, pause: 0 },
+    { x: 3.0, z: 4.0, pause: 0 },
+  ];
+  let waitress: { character: VrmCharacter; leg: number; wait: number } | null = null;
+  const loadWaitress = async () => {
+    try {
+      const gltf = await vrmLoader.parseAsync(await fetchVrmBuffer(FEMALE), '');
+      const character = createVrmCharacter(
+        prepareVrm(gltf as unknown as Parameters<typeof prepareVrm>[0]),
+        { pose: 'standing', alcohol: 0, mood: 'happy', cheers: false },
+        { targetHeight: 1.56, outfit: outfit({ top: '#166534', bottom: '#111827', hair: '#1c1917' }, ['headband']) }
+      );
+      character.root.position.set(WAITRESS_ROUTE[0].x, 0, WAITRESS_ROUTE[0].z);
+      enableShadows(character.root);
+      character.root.traverse((object) => (object.castShadow = false));
+      scene.add(character.root);
+      characters.push(character);
+      characterTable.set(character, -1);
+      character.mug.visible = false;
+      waitress = { character, leg: 0, wait: WAITRESS_ROUTE[0].pause };
+    } catch (error) {
+      console.warn('[next-gen bar] waitress failed to load', error);
+    }
+  };
+  /** Standing staff inside the house (no beer in hand). */
+  const loadStaff = async (url: string, spot: Seat, look: { height: number; outfit: VrmOutfit }) => {
+    try {
+      const gltf = await vrmLoader.parseAsync(await fetchVrmBuffer(url), '');
+      const character = createVrmCharacter(
+        prepareVrm(gltf as unknown as Parameters<typeof prepareVrm>[0]),
+        { pose: 'standing', alcohol: 0, mood: 'neutral', cheers: false },
+        { targetHeight: look.height, outfit: look.outfit }
+      );
+      character.root.position.set(spot.x, 0, spot.z);
+      character.root.rotation.y = spot.facing;
+      character.mug.visible = false;
+      enableShadows(character.root);
+      character.root.traverse((object) => (object.castShadow = false));
+      scene.add(character.root);
+      characters.push(character);
+      characterTable.set(character, -1);
+    } catch (error) {
+      console.warn('[next-gen bar] staff failed to load', error);
+    }
+  };
+  // Load them one after another so the parse hitches are spread out.
+  void PATRONS.reduce(
+    (chain, [url, seat, alcohol, look]) => chain.then(() => seatCharacter(url, seat, alcohol, look)),
+    Promise.resolve()
+  )
+    .then(loadWaitress)
+    .then(() => loadStaff(MALE, house.staff.cook, { height: 1.66, outfit: outfit({ top: '#f8fafc', bottom: '#1f2937' }, ['headband']) }))
+    .then(() => loadStaff(FEMALE, house.staff.cashier, { height: 1.55, outfit: outfit({ top: '#be123c', hair: '#1c1917' }) }));
+  const waitressStep = new THREE.Vector3();
+  const updateWaitress = (delta: number) => {
+    if (!waitress) return;
+    const { character } = waitress;
+    if (waitress.wait > 0) {
+      waitress.wait -= delta;
+      character.state.pose = 'standing';
+      return;
+    }
+    const next = WAITRESS_ROUTE[(waitress.leg + 1) % WAITRESS_ROUTE.length];
+    waitressStep.set(next.x - character.root.position.x, 0, next.z - character.root.position.z);
+    const distance = waitressStep.length();
+    const step = VRM_MOVE_SPEED.walking * delta;
+    character.state.pose = 'walking';
+    if (distance <= step) {
+      character.root.position.set(next.x, 0, next.z);
+      waitress.leg = (waitress.leg + 1) % WAITRESS_ROUTE.length;
+      waitress.wait = next.pause;
+      return;
+    }
+    character.root.position.addScaledVector(waitressStep, step / distance);
+    const heading = Math.atan2(waitressStep.x, waitressStep.z);
+    const turn = Math.atan2(Math.sin(heading - character.root.rotation.y), Math.cos(heading - character.root.rotation.y));
+    character.root.rotation.y += turn * (1 - Math.exp(-10 * delta));
+  };
 
   // ---- Splat backdrop (separate scene / pass) ----
   const splatScene = new THREE.Scene();
@@ -344,7 +519,10 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   controls.minDistance = 1.5;
   controls.maxDistance = 24;
   // Keep the orbit centre on the embankment so the camera can't wander off the map.
-  const targetLimit = new THREE.Box3(new THREE.Vector3(-14, 0.3, -5), new THREE.Vector3(14, 3, 6));
+  const targetLimit = new THREE.Box3(
+    new THREE.Vector3(-14, 0.3, -5),
+    new THREE.Vector3(14, 3, scenery.house.interior.max.z) // up to the back of the house
+  );
   controls.update();
 
   // ---- Post-processing (TSL) ----
@@ -507,7 +685,12 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
   const cameraForward = new THREE.Vector3();
   const followTarget = new THREE.Vector3();
   const followShift = new THREE.Vector3();
-  let cheersTimer = 4;
+  const indoorProbe = new THREE.Vector3();
+  const cameraRoom = house.interior.clone();
+  cameraRoom.min.z -= 3; // allow looking in from just outside the shutter
+  const characterProbe = new THREE.Vector3();
+  // Each table toasts on its own rhythm.
+  const cheersTimers = new Map<number, number>();
   renderer.setAnimationLoop(() => {
     const rawDelta = clock.getDelta();
     const delta = Math.min(rawDelta, 0.05);
@@ -527,17 +710,36 @@ export async function createNextGenBar(container: HTMLElement): Promise<NextGenB
     } else {
       controls.target.clamp(targetLimit.min, targetLimit.max);
     }
+    // Indoors the orbit would put the camera through the walls: pull it in and keep it
+    // inside the room (it may lean out of the open shopfront).
+    const indoors =
+      !!player?.enabled &&
+      !!playerCharacter &&
+      house.interior.containsPoint(indoorProbe.set(playerCharacter.root.position.x, 1, playerCharacter.root.position.z));
+    const inWc = indoors && house.tight.containsPoint(indoorProbe);
+    controls.maxDistance = inWc ? 1.7 : indoors ? 4.2 : 24;
     controls.update();
-    scenery.update(clock.elapsedTime, delta);
-    // Every few seconds the table raises a toast.
-    cheersTimer -= delta;
-    const cheering = cheersTimer < 1.2;
-    if (cheersTimer < 0) cheersTimer = 6 + Math.random() * 4;
+    if (indoors) camera.position.clamp(cameraRoom.min, cameraRoom.max);
+    scenery.update(clock.elapsedTime, delta, player?.enabled ? playerCharacter?.root.position : undefined);
+    // Every few seconds each table raises a toast.
+    for (const [table, timer] of cheersTimers) {
+      cheersTimers.set(table, timer < 0 ? 6 + Math.random() * 6 : timer - delta);
+    }
     characters.forEach((character) => {
+      // Far-away customers are skipped (VRoid models are heavy to draw and animate).
+      if (character !== playerCharacter) {
+        const far = camera.position.distanceTo(characterProbe.copy(character.root.position)) > 26;
+        character.root.visible = !far;
+        if (far) return;
+      }
+      const table = characterTable.get(character) ?? 0;
+      if (!cheersTimers.has(table)) cheersTimers.set(table, 2 + table * 1.7);
       // Only people sitting at a table join the toast.
-      character.state.cheers = cheering && character.state.pose === 'seated';
+      character.state.cheers = cheersTimers.get(table)! < 1.2 && character.state.pose === 'seated';
       character.update(delta);
     });
+    animatedDishes.forEach((dish) => dish.userData.update(clock.elapsedTime));
+    updateWaitress(delta);
     bulb.intensity = 14 + Math.sin(clock.elapsedTime * 13) * 0.6; // filament flicker
     pipeline.render();
 

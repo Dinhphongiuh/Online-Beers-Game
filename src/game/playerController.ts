@@ -18,6 +18,8 @@ export interface Seat {
   z: number;
   /** root.rotation.y that faces the table. */
   facing: number;
+  /** Which table the seat belongs to (tables toast together). */
+  table?: number;
 }
 
 export interface PlayerBounds {
