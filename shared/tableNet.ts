@@ -15,7 +15,7 @@ export const POSE_SEND_INTERVAL_MS = 66;
 export const TABLE_PATCH_MS = 50;
 
 /** Where & how hard the table drinks — picked by the host, shared with every guest. */
-export const TABLE_THEMES = ['sidewalk', 'bo_ke', 'rooftop'] as const;
+export const TABLE_THEMES = ['sidewalk', 'bo_ke', 'rooftop', 'quan_oc'] as const;
 export const TABLE_SPEEDS = ['lai_rai', 'toi_ben', 'tu_chien'] as const;
 export interface TableSetup {
   theme: (typeof TABLE_THEMES)[number];

@@ -86,6 +86,10 @@ import {
   SurrenderPhase,
 } from './components/SurrenderBillVoteHUD';
 import { CommuteLoopModal } from './components/CommuteLoopModal';
+// "Quán Ốc Bờ Sông" map: its own rides to / from the quán, loaded only on that map.
+const QuanOcCommute = React.lazy(() =>
+  import('./official/quanOcBoSong/QuanOcCommute').then((module) => ({ default: module.QuanOcCommute }))
+);
 import {
   BikeSkinId,
   CommuteTransportMode,
@@ -328,6 +332,10 @@ export default function App({
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneController | null>(null);
   const walkStepCountRef = useRef<number>(0);
+  /** WASD keys currently held while free-roaming (moved continuously, diagonals included). */
+  const heldMoveKeysRef = useRef<Set<string>>(new Set());
+  /** Shift held: run. */
+  const runHeldRef = useRef(false);
 
   // Table State
   const [tableState, setTableState] = useState<TableState>({
@@ -1223,6 +1231,77 @@ export default function App({
 
   }, [tableState.roomId]);
 
+  // Free-roam walking: while WASD keys are held, move continuously toward their sum
+  // (W+D walks diagonally), relative to the camera; Shift runs. ~25 updates a second,
+  // the 3D rig glides between them.
+  useEffect(() => {
+    const held = heldMoveKeysRef.current;
+    if (ikState.controlMode !== 'free_roam') {
+      held.clear();
+      return;
+    }
+    const WALK_SPEED = 3.0; // m/s
+    const RUN_SPEED = 5.2;
+    const STEP_LENGTH = 0.22; // one "bước chân" for the sweat-it-off rule
+    let last = performance.now();
+    let walked = 0;
+    const tick = window.setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      const lx = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
+      const lz = (held.has('s') ? 1 : 0) - (held.has('w') ? 1 : 0);
+      if (!lx && !lz) return;
+      const len = Math.hypot(lx, lz);
+      const step = (runHeldRef.current ? RUN_SPEED : WALK_SPEED) * dt;
+      const localX = (lx / len) * step;
+      const localZ = (lz / len) * step;
+      // W walks where the camera faces once mouse look has turned it
+      const yaw = sceneRef.current?.getCameraYaw() ?? 0;
+      const dx = localX * Math.cos(yaw) + localZ * Math.sin(yaw);
+      const dz = -localX * Math.sin(yaw) + localZ * Math.cos(yaw);
+      // Vận động đi lại toát mồ hôi: cứ 12 bước chân giải bớt 1% cồn & hồi thể lực!
+      walked += step;
+      while (walked >= STEP_LENGTH) {
+        walked -= STEP_LENGTH;
+        walkStepCountRef.current += 1;
+        if (walkStepCountRef.current % 12 === 0) {
+          setTableState((ts) => ({
+            ...ts,
+            players: ts.players.map((p) =>
+              p.isUser && p.alcoholLevel > 0
+                ? { ...p, alcoholLevel: Math.max(0, p.alcoholLevel - 1), stamina: Math.min(100, p.stamina + 2) }
+                : p
+            ),
+          }));
+        }
+      }
+      setIkState((prev) => {
+        if (prev.controlMode !== 'free_roam') return prev;
+        const { x, z } = constrainRoam(prev.freeRoamPos.x + dx, prev.freeRoamPos.z + dz);
+        return { ...prev, freeRoamPos: { x, z, angle: Math.atan2(dx, dz), isMoving: true } };
+      });
+    }, 40);
+    const release = () => held.clear();
+    window.addEventListener('blur', release);
+    return () => {
+      window.clearInterval(tick);
+      window.removeEventListener('blur', release);
+    };
+    // constrainRoam reads the scene ref at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ikState.controlMode]);
+
+  // A modal takes the keyboard: don't keep walking with keys it swallowed.
+  useEffect(() => {
+    if (activeModal !== 'none') heldMoveKeysRef.current.clear();
+  }, [activeModal]);
+
+  // The table's map → the 3D surroundings (street, or Quán Ốc Bờ Sông).
+  useEffect(() => {
+    sceneRef.current?.setTheme(tableState.theme);
+  }, [tableState.theme]);
+
   // Initialize 3D Scene once
   useEffect(() => {
     if (!canvasMountRef.current) return;
@@ -1233,6 +1312,7 @@ export default function App({
     if (import.meta.env.DEV) (window as unknown as { __beerScene?: SceneController }).__beerScene = scene;
     scene.mount(canvasMountRef.current);
     scene.setGraphicsQuality(graphics);
+    scene.setTheme(tableState.theme);
     scene.updatePlayers(tableState.players);
     scene.updateFoodDishes(tableState.foodDishes);
 
@@ -2211,8 +2291,7 @@ export default function App({
       const driftAngle = (Math.random() - 0.5) * 1.4;
       const dx = Math.sin(driftAngle) * 0.45;
       const dz = -Math.cos(driftAngle) * 0.35;
-      const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
-      const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
+      const { x: nx, z: nz } = constrainRoam(prev.freeRoamPos.x + dx, prev.freeRoamPos.z + dz);
 
       // If not holding Grab Support and either drunk or unlucky, trip over a beer crate -> Faceplant!
       const tripChance = prev.isHoldingGrabSupport
@@ -2983,39 +3062,12 @@ export default function App({
         e.key === 'S'
       ) {
         const key = e.key.toLowerCase();
+        runHeldRef.current = e.shiftKey;
         setIkState((prev) => {
           if (prev.controlMode === 'free_roam') {
-            walkStepCountRef.current += 1;
-            // Vận động đi lại toát mồ hôi: cứ 12 bước chân giải bớt 1% cồn & hồi thể lực!
-            if (walkStepCountRef.current % 12 === 0) {
-              setTableState((ts) => ({
-                ...ts,
-                players: ts.players.map((p) =>
-                  p.isUser && p.alcoholLevel > 0
-                    ? {
-                        ...p,
-                        alcoholLevel: Math.max(0, p.alcoholLevel - 1),
-                        stamina: Math.min(100, p.stamina + 2),
-                      }
-                    : p
-                ),
-              }));
-            }
-
-            const step = 0.22;
-            const localX = key === 'a' ? -step : key === 'd' ? step : 0;
-            const localZ = key === 'w' ? -step : key === 's' ? step : 0;
-            // W walks where the camera faces once mouse look has turned it
-            const yaw = sceneRef.current?.getCameraYaw() ?? 0;
-            const dx = localX * Math.cos(yaw) + localZ * Math.sin(yaw);
-            const dz = -localX * Math.sin(yaw) + localZ * Math.cos(yaw);
-            const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
-            const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
-            const angle = Math.atan2(dx, dz);
-            return {
-              ...prev,
-              freeRoamPos: { x: nx, z: nz, angle, isMoving: true },
-            };
+            // Walking is continuous (see the free-roam movement loop): just mark the key held.
+            heldMoveKeysRef.current.add(key);
+            return prev;
           } else {
             // Seated Chair Balance A / D
             const deltaBal = key === 'a' ? -24 : key === 'd' ? 24 : 0;
@@ -3030,11 +3082,15 @@ export default function App({
 
     const onKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      runHeldRef.current = e.shiftKey;
       if (['w', 'a', 's', 'd'].includes(key)) {
-        setIkState((prev) => ({
-          ...prev,
-          freeRoamPos: { ...prev.freeRoamPos, isMoving: false },
-        }));
+        heldMoveKeysRef.current.delete(key);
+        if (heldMoveKeysRef.current.size === 0) {
+          setIkState((prev) => ({
+            ...prev,
+            freeRoamPos: { ...prev.freeRoamPos, isMoving: false },
+          }));
+        }
       }
     };
 
@@ -4008,6 +4064,7 @@ export default function App({
       sidewalk: 'Vỉa Hè Đèn Neon Sài Gòn',
       bo_ke: 'Quán Nhậu Bờ Kè Hoàng Hôn',
       rooftop: 'Bàn Nhậu Rooftop Chill',
+      quan_oc: 'Quán Ốc Bờ Sông',
     };
     setTableState((prev) => ({
       ...prev,
@@ -4881,6 +4938,21 @@ export default function App({
     }).catch(() => null);
   };
 
+  const isQuanOcMap = tableState.theme === 'quan_oc';
+  /** Where free-roaming may go (whole map on Quán Ốc, the table's pavement elsewhere). */
+  const constrainRoam = (x: number, z: number) =>
+    sceneRef.current?.constrainRoam(x, z) ?? { x: Math.max(-4.8, Math.min(4.8, x)), z: Math.max(-3.6, Math.min(3.8, z)) };
+  /** Leave the commute (either kind): back in the stool, seated camera. */
+  const closeCommute = () => {
+    sceneRef.current?.updateCommute3DState({ active: false });
+    setIkState((prev) => ({
+      ...prev,
+      controlMode: 'seated',
+      cameraMode: 'seated_3rd',
+    }));
+    setIsCommuteModalOpen(false);
+  };
+
   const handleOpenCommuteModal = (phase: 'outbound' | 'return' = 'outbound') => {
     sceneRef.current?.releasePointerLock();
     setCommuteModalPhase(phase);
@@ -5644,8 +5716,7 @@ export default function App({
                 }));
               }
               setIkState((prev) => {
-                const nx = Math.max(-4.8, Math.min(4.8, prev.freeRoamPos.x + dx));
-                const nz = Math.max(-3.6, Math.min(3.8, prev.freeRoamPos.z + dz));
+                const { x: nx, z: nz } = constrainRoam(prev.freeRoamPos.x + dx, prev.freeRoamPos.z + dz);
                 const angle = Math.atan2(dx, dz);
                 return {
                   ...prev,
@@ -5959,9 +6030,29 @@ export default function App({
         }}
       />
 
+      {/* Quán Ốc Bờ Sông: ride from the home alley to the quán's parking lot (and back). */}
+      {isQuanOcMap && isCommuteModalOpen && (
+        <React.Suspense
+          fallback={<div className="fixed inset-0 z-[80] flex items-center justify-center bg-black text-sm font-bold text-amber-200">🛵 Đang dắt xe ra…</div>}
+        >
+          <QuanOcCommute
+            phase={commuteModalPhase}
+            userPlayer={userPlayer}
+            onOutbound={(payload) => {
+              handleApplyOutboundCommuteResult(payload);
+              closeCommute();
+            }}
+            onReturn={(result) => {
+              closeCommute();
+              handleApplyReturnCommuteResult(result);
+            }}
+          />
+        </React.Suspense>
+      )}
+
       {/* "Lộ Trình Di Chuyển: Đi Tỉnh Về Quắc" (3D Immersive Commute & FPP/TPP Driving HUD) */}
       <CommuteLoopModal
-        isOpen={isCommuteModalOpen}
+        isOpen={isCommuteModalOpen && !isQuanOcMap}
         initialPhase={commuteModalPhase}
         userPlayer={userPlayer}
         totalBill={tableState.totalBill}
@@ -5971,15 +6062,7 @@ export default function App({
         onApplyOutboundResult={handleApplyOutboundCommuteResult}
         onApplyReturnResult={handleApplyReturnCommuteResult}
         onRedeemImpoundedBikeForTest={handleRedeemImpoundedBikeForTest}
-        onClose={() => {
-          sceneRef.current?.updateCommute3DState({ active: false });
-          setIkState((prev) => ({
-            ...prev,
-            controlMode: 'seated',
-            cameraMode: 'seated_3rd',
-          }));
-          setIsCommuteModalOpen(false);
-        }}
+        onClose={closeCommute}
       />
 
       {/* Unified Collapsible Bottom Dock (Hidden during 3D Commute / Driving so 3D Cockpit is 100% unobstructed) */}

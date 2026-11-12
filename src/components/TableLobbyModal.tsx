@@ -135,6 +135,12 @@ export const TableLobbyModal: React.FC<TableLobbyModalProps> = ({
       icon: '🌃',
       desc: 'Ngắm Landmark lung linh, nhạc lofi chill, nhậu xuyên màn đêm',
     },
+    {
+      id: 'quan_oc',
+      name: 'Quán Ốc Bờ Sông',
+      icon: '🦪',
+      desc: 'Bờ kè, quầy ốc, bãi giữ xe — tự chạy xe tới quán và chạy xe về',
+    },
   ];
 
   return (

@@ -114,6 +114,7 @@ export const MAP_LABELS: Record<string, string> = {
   sidewalk: 'Vỉa Hè Phố Đêm',
   bo_ke: 'Bờ Kè Ven Sông',
   rooftop: 'Sân Thượng Chill',
+  quan_oc: 'Quán Ốc Bờ Sông',
 };
 
 // ---------------------------------------------------------------------------

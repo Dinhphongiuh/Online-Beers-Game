@@ -117,6 +117,21 @@ function resolve(p: THREE.Vector3, collider: Collider) {
   p.z = collider.z + local.z;
 }
 
+/**
+ * Where a body at (x, z) ends up after being pushed out of every collider and kept
+ * inside the walkable bounds (used by the controller, and by the table scene of the
+ * official Quán Ốc map for its free-roam walking).
+ */
+export function constrainToArea(x: number, z: number, colliders: Collider[], bounds: PlayerBounds) {
+  const p = new THREE.Vector3(x, 0, z);
+  // Two passes settle the corners where colliders meet.
+  for (let pass = 0; pass < 2; pass++) colliders.forEach((collider) => resolve(p, collider));
+  return {
+    x: THREE.MathUtils.clamp(p.x, bounds.minX, bounds.maxX),
+    z: THREE.MathUtils.clamp(p.z, bounds.minZ, bounds.maxZ),
+  };
+}
+
 const angleDamp = (current: number, target: number, rate: number, delta: number) => {
   const diff = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + diff * (1 - Math.exp(-rate * delta));

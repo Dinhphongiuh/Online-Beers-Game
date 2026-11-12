@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "role": "tsx scripts/role.ts"
+    "role": "tsx scripts/role.ts",
+    "promote:quan-oc": "tsx scripts/promote-quan-oc.ts"
   },
   "dependencies": {
     "@colyseus/core": "^0.18.27",

@@ -48,12 +48,19 @@ export const LOBBY_MAPS: { id: PubTheme; name: string; icon: string; desc: strin
   { id: 'bo_ke', name: 'Bờ Kè Ven Sông', icon: '🌊', desc: 'Gió sông lồng lộng, mồi hải sản tươi rói' },
   { id: 'sidewalk', name: 'Ngã Tư Vỉa Hè', icon: '🛵', desc: 'Còi xe inh ỏi, ghế nhựa tràn ra lề đường' },
   { id: 'rooftop', name: 'Phòng VIP Karaoke', icon: '🎤', desc: 'Đèn chớp xanh đỏ, loa kẹo kéo hết công suất' },
+  {
+    id: 'quan_oc',
+    name: 'Quán Ốc Bờ Sông',
+    icon: '🦪',
+    desc: 'Bờ kè, quầy ốc, bãi giữ xe — tự chạy xe tới quán và chạy xe về',
+  },
 ];
 
 export const THEME_NAMES: Record<PubTheme, string> = {
   bo_ke: 'Bờ Kè Ven Sông',
   sidewalk: 'Ngã Tư Vỉa Hè Sài Gòn',
   rooftop: 'Phòng VIP Karaoke',
+  quan_oc: 'Quán Ốc Bờ Sông',
 };
 
 export const DRUNK_SPEEDS: {

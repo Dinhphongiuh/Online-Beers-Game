@@ -634,7 +634,18 @@ function createSky() {
 
 // ---------- assembly ----------
 
-export function createRiversideScenery(): RiversideScenery {
+export interface RiversideSceneryOptions {
+  /**
+   * Built around the multiplayer table scene (threeScene), which brings its own
+   * interactive props next to the table: leave out what would collide with them
+   * (the three nearest neighbour tables, the standing fan, the light strings
+   * crossing over the table).
+   */
+  tableMode?: boolean;
+}
+
+export function createRiversideScenery(options: RiversideSceneryOptions = {}): RiversideScenery {
+  const tableMode = options.tableMode ?? false;
   const ground = createGround();
   const props = new THREE.Group();
   props.name = 'RiversideProps';
@@ -673,6 +684,7 @@ export function createRiversideScenery(): RiversideScenery {
   ];
   const NEIGHBOUR_TOP = 0.98 * 0.9; // createNeighborTableGroup scales the table by 0.9 in Y
   NEIGHBOUR_TABLES.forEach(({ x, z, rotation, dishes, umbrella, iceBucket }, index) => {
+    if (tableMode && Math.hypot(x, z) < 6) return;
     const neighbour = createNeighborTableGroup();
     neighbour.position.set(x, 0, z);
     neighbour.rotation.y = rotation;
@@ -776,14 +788,16 @@ export function createRiversideScenery(): RiversideScenery {
   circle(10.8, -2.8, 0.45);
   circle(11.5, -2.1, 0.45);
 
-  const fan = createStandingIndustrialFan();
-  fan.group.position.set(-2.6, 0, -4.4);
-  fan.group.rotation.y = 0.5; // blowing toward the main table
-  props.add(fan.group);
-  circle(-2.6, -4.4, 0.3);
-  updates.push((_, delta) => {
-    fan.bladesGroup.rotation.z += delta * 14;
-  });
+  if (!tableMode) {
+    const fan = createStandingIndustrialFan();
+    fan.group.position.set(-2.6, 0, -4.4);
+    fan.group.rotation.y = 0.5; // blowing toward the main table
+    props.add(fan.group);
+    circle(-2.6, -4.4, 0.3);
+    updates.push((_, delta) => {
+      fan.bladesGroup.rotation.z += delta * 14;
+    });
+  }
 
   // Trees in planters along the curb.
   [
@@ -837,12 +851,14 @@ export function createRiversideScenery(): RiversideScenery {
       0.6
     )
   );
-  props.add(
-    festoon([new THREE.Vector3(-7, 3.05, RIVER_EDGE_Z + 0.2), new THREE.Vector3(5, 3.05, ROAD_EDGE_Z - 0.3)], 0.35, 0.55)
-  );
-  props.add(
-    festoon([new THREE.Vector3(7, 3.05, RIVER_EDGE_Z + 0.2), new THREE.Vector3(-5, 3.05, ROAD_EDGE_Z - 0.3)], 0.35, 0.55)
-  );
+  if (!tableMode) {
+    props.add(
+      festoon([new THREE.Vector3(-7, 3.05, RIVER_EDGE_Z + 0.2), new THREE.Vector3(5, 3.05, ROAD_EDGE_Z - 0.3)], 0.35, 0.55)
+    );
+    props.add(
+      festoon([new THREE.Vector3(7, 3.05, RIVER_EDGE_Z + 0.2), new THREE.Vector3(-5, 3.05, ROAD_EDGE_Z - 0.3)], 0.35, 0.55)
+    );
+  }
 
   // ---- Backdrop: river, boats, bridge, far bank, shophouses, sky ----
   const ripples = rippleNormalTexture();

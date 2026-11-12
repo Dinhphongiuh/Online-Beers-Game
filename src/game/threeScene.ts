@@ -40,7 +40,9 @@ import {
   MinigameId,
   FoodDish,
   IKHandControlState,
+  type PubTheme,
 } from './types';
+import type { QuanOcTableEnvironment } from '../official/quanOcBoSong/tableEnvironment';
 import {
   createCommute3DWorld,
   Commute3DController,
@@ -109,6 +111,16 @@ export interface SceneController {
   getCameraYaw: () => number;
   /** 'low' drops pixel ratio to 1 and disables shadows for weak devices. */
   setGraphicsQuality: (quality: 'low' | 'high') => void;
+  /**
+   * The table's map (picked at "Chọn quán"). 'quan_oc' swaps the Saigon street backdrop
+   * for the Quán Ốc Bờ Sông surroundings (loaded on demand); other maps keep the street.
+   */
+  setTheme: (theme: PubTheme) => void;
+  /**
+   * Where a free-roaming player at (x, z) is allowed to be: the whole Quán Ốc map (with
+   * walls and props) on that map, the patch of pavement around the table elsewhere.
+   */
+  constrainRoam: (x: number, z: number) => { x: number; z: number };
   /** Updates the 3D Commute & FPP/TPP Motorbike Driving world inside Three.js. */
   updateCommute3DState: (partial: Partial<Commute3DState>) => void;
   // ---- Rapier table physics (cans, bottles, dép tổ ong) ----
@@ -339,6 +351,17 @@ export function initThreeScene(): SceneController {
   let onLobbySeatClickCb: ((seatIndex: number) => void) | undefined;
   let onResizeHandler: (() => void) | null = null;
   let streetBackdrop: StreetBackdrop | null = null;
+  /**
+   * Street-map scenery and furniture (ATM, kitchen, karaoke speaker, neighbour table,
+   * fan, WC booth, fairy lights…) taken out of the scene when another map (Quán Ốc)
+   * brings its own surroundings. Detached rather than hidden: the click raycast also
+   * hits invisible objects. The green tree stays on every map.
+   */
+  const streetThemeObjects: THREE.Object3D[] = [];
+  let currentTheme: PubTheme = 'sidewalk';
+  let themeRequest = 0;
+  let quanOcEnv: QuanOcTableEnvironment | null = null;
+  const STREET_LOOK = { fog: 0x1a1330, density: 0.02, background: 0x140f24, far: 50 };
   // Bloom makes neon, lit windows and street lamps glow ("Đẹp" graphics only)
   // pmndrs/postprocessing: bloom + "Quắc Cần Câu" drunk vision (see drunkVision.ts)
   let composer: DrunkVisionPipeline | null = null;
@@ -678,6 +701,24 @@ export function initThreeScene(): SceneController {
     streetMotorbike = createStreetMotorbike();
     streetMotorbike.position.set(-10, 0, 4.35);
     scene.add(streetMotorbike);
+    streetThemeObjects.push(
+      streetBackdrop.group,
+      ground,
+      curb,
+      neonSign,
+      whiteLine,
+      foodCart,
+      crates1,
+      crates2,
+      streetMotorbike,
+      fairyLights,
+      neighborTable,
+      karaokeSpeaker.group,
+      openKitchen.group,
+      convenienceATM,
+      industrialFan.group
+    );
+    if (commute3DWorld) streetThemeObjects.push(commute3DWorld.root);
 
     // Retractable Rain Tarp Canopy (hidden retracted by default, slides out when pulled)
     retractableTarp = createRetractableTarp();
@@ -724,6 +765,7 @@ export function initThreeScene(): SceneController {
     toiletBooth.group.rotation.y = 0.45;
     toiletBooth.group.userData = { isToiletBooth: true };
     scene.add(toiletBooth.group);
+    streetThemeObjects.push(toiletBooth.group);
 
     // "ĐỒ NHẤP MÔI" Spotlight Cone Beam from ceiling
     const spotConeGeo = new THREE.ConeGeometry(0.55, 2.5, 20, 1, true);
@@ -2233,6 +2275,7 @@ export function initThreeScene(): SceneController {
     if (pointerLocked && lobbyMode === 'off' && !isCommute3DCamera) updateCrosshairAim();
 
     streetBackdrop?.update(time);
+    if (quanOcEnv?.group.parent) quanOcEnv.update(time, rawDelta);
 
     if (composer && bloomEnabled) {
       const isDrunkRide = commute3DState.stage === 'return_drunk_fpp_drive';
@@ -2282,7 +2325,53 @@ export function initThreeScene(): SceneController {
     frameId = window.setTimeout(poll, 5);
   }
 
+  /** Show the street map, or swap in the Quán Ốc Bờ Sông surroundings. */
+  function applyTheme(theme: PubTheme) {
+    const request = ++themeRequest;
+    const useStreet = (street: boolean) => {
+      streetThemeObjects.forEach((o) => {
+        if (street && !o.parent) scene?.add(o);
+        else if (!street) o.removeFromParent();
+      });
+      if (!scene || !camera) return;
+      const look = street || !quanOcEnv ? STREET_LOOK : { fog: quanOcEnv.fog.color, density: quanOcEnv.fog.density, background: quanOcEnv.background, far: quanOcEnv.cameraFar };
+      scene.fog = new THREE.FogExp2(look.fog, look.density);
+      scene.background = new THREE.Color(look.background);
+      camera.far = look.far;
+      camera.updateProjectionMatrix();
+    };
+    if (theme !== 'quan_oc') {
+      quanOcEnv?.group.removeFromParent();
+      useStreet(true);
+      return;
+    }
+    // Loaded on demand: tables on the other maps never download it.
+    void import('../official/quanOcBoSong/tableEnvironment').then(({ createQuanOcTableEnvironment }) => {
+      if (request !== themeRequest || !scene) return;
+      quanOcEnv ??= createQuanOcTableEnvironment();
+      scene.add(quanOcEnv.group);
+      useStreet(false);
+    });
+  }
+
   return {
+    constrainRoam: (x: number, z: number) => {
+      if (quanOcEnv?.group.parent) {
+        const p = quanOcEnv.constrain(x, z);
+        // The green tree (kept from the street map) has a trunk to walk around too.
+        const dx = p.x - TREE_POS.x;
+        const dz = p.z - TREE_POS.z;
+        const d = Math.hypot(dx, dz);
+        const reach = 0.5 + 0.28; // planter + body radius
+        if (d < reach) return { x: TREE_POS.x + (dx / (d || 1)) * reach, z: TREE_POS.z + (dz / (d || 1)) * reach };
+        return p;
+      }
+      return { x: Math.max(-4.8, Math.min(4.8, x)), z: Math.max(-3.6, Math.min(3.8, z)) };
+    },
+    setTheme: (theme: PubTheme) => {
+      currentTheme = theme;
+      if (scene) applyTheme(theme);
+    },
     mount: (mountDiv: HTMLDivElement) => {
       container = mountDiv;
 
@@ -2313,6 +2402,7 @@ export function initThreeScene(): SceneController {
       mountDiv.appendChild(renderer.domElement);
 
       setupScene();
+      applyTheme(currentTheme);
 
       // Physics WASM loads in the background; the table works without it until then
       loadRapier()
@@ -2359,6 +2449,8 @@ export function initThreeScene(): SceneController {
     destroy: () => {
       sceneDestroyed = true;
       commute3DWorld?.dispose();
+      quanOcEnv?.dispose();
+      quanOcEnv = null;
       tablePhysics?.dispose();
       tablePhysics = null;
       if (isSoftwareGl) {

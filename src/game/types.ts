@@ -8,7 +8,7 @@ export type HatType = 'none' | 'sunglasses' | 'traffic_helmet' | 'towel';
 
 export type GlassType = 'beer_mug' | 'coi_glass' | 'horn' | 'jade_cup';
 
-export type PubTheme = 'sidewalk' | 'bo_ke' | 'rooftop';
+export type PubTheme = 'sidewalk' | 'bo_ke' | 'rooftop' | 'quan_oc';
 
 export type DrunkStatus = 'sober' | 'tipsy' | 'drunk' | 'passed_out';
 

@@ -100,7 +100,7 @@ export const HostRoomPanel: React.FC<{
 
         <div className="mb-4">
           <div className="text-sm font-black mb-2 border-b border-dashed border-white/30 pb-1">📍 Chọn Địa Điểm</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {LOBBY_MAPS.map((opt) => (
               <button
                 key={opt.id}

@@ -10,6 +10,7 @@ import { usePresenceHeartbeat } from './net/socialApi';
 import { useSocialEvents, useSocialSocket } from './net/socialSocket';
 import { socialEventToast } from '../shared/social';
 import { DEFAULT_CHIBI_APPEARANCE, type ChibiAppearanceDNA } from '../shared/appearance';
+import { TABLE_THEMES } from '../shared/tableNet';
 
 type AuthStatus = 'checking' | 'authed' | 'anon';
 const TOKEN_KEY = 'tram_nhau_auth_token';
@@ -33,10 +34,15 @@ type Phase = 'menu' | 'foam_in' | 'game' | 'foam_out';
 /** Shows the 3D lobby first, then swaps to the match behind a beer-foam wipe. */
 export default function Root() {
   // Home menu first; the commute (house → alley → pub) starts once you enter the match.
-  // `?autostart=1` jumps straight into a default match (dev shortcut).
+  // `?autostart=1` jumps straight into a default match (dev shortcut);
+  // add `&map=quan_oc` (or another map id) to pick the map.
   const isAutostart =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('autostart') === '1';
+  const autostartMap = (() => {
+    const id = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('map') : null;
+    return TABLE_THEMES.find((theme) => theme === id) ?? 'sidewalk';
+  })();
 
   const [phase, setPhase] = useState<Phase>(isAutostart ? 'game' : 'menu');
   const [config, setConfig] = useState<LobbyConfig | null>(() =>
@@ -52,7 +58,7 @@ export default function Root() {
           },
           squadIds: INITIAL_PLAYERS.slice(1).map((p) => p.id),
           roomCode: '4089',
-          theme: 'sidewalk',
+          theme: autostartMap,
           drunkSpeed: 'toi_ben',
           rules: {
             micDzo: false,
